@@ -22,7 +22,7 @@ type Openstack struct {
 
 type OpenstackSpec struct {
 	EndpointAddress string                 `json:"endpoint"`
-	Project         string                 `json:"dc"`
+	Region          string                 `json:"dc"`
 	Credentials     corev1.SecretReference `json:"credentials"`
 }
 
@@ -37,7 +37,7 @@ func (o *Openstack) ClusterStatus() ClusterStatus {
 }
 
 func (o *Openstack) GenerateClient(ctx context.Context, secret *corev1.Secret) (VirtualMachineOperations, error) {
-	return openstack.NewClient(ctx, o.Spec.EndpointAddress, o.Spec.Project, secret)
+	return openstack.NewClient(ctx, o.Spec.EndpointAddress, o.Spec.Region, secret)
 }
 
 func (o *Openstack) SecretReference() corev1.SecretReference {
