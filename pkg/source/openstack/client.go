@@ -3,23 +3,45 @@ package openstack
 import (
 	"context"
 	"fmt"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"github.com/gophercloud/gophercloud/openstack/blockstorage/extensions/volumeactions"
+	"github.com/gophercloud/gophercloud/openstack/compute/v2/flavors"
+	"github.com/gophercloud/gophercloud/openstack/imageservice/v2/images"
+	"github.com/harvester/vm-import-controller/pkg/qemu"
+	"github.com/harvester/vm-import-controller/pkg/server"
+	"io/ioutil"
 	"os"
+	"path/filepath"
+	"time"
 
-	"github.com/gophercloud/gophercloud/openstack/compute/v2/servers"
-	"github.com/sirupsen/logrus"
-
+	"github.com/google/uuid"
 	"github.com/gophercloud/gophercloud"
 	"github.com/gophercloud/gophercloud/openstack"
+	"github.com/gophercloud/gophercloud/openstack/blockstorage/v2/volumes"
+	"github.com/gophercloud/gophercloud/openstack/blockstorage/v3/snapshots"
+	"github.com/gophercloud/gophercloud/openstack/compute/v2/extensions/startstop"
+	"github.com/gophercloud/gophercloud/openstack/compute/v2/servers"
+	"github.com/gophercloud/gophercloud/openstack/imageservice/v2/imagedata"
 	importjob "github.com/harvester/vm-import-controller/pkg/apis/importjob.harvesterhci.io/v1beta1"
+	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubevirt "kubevirt.io/api/core/v1"
 )
 
+const (
+	NotUniqueName   = "notUniqueName"
+	NotServerFound  = "noServerFound"
+	defaultInterval = 10 * time.Second
+	defaultCount    = 30
+)
+
 type Client struct {
-	ctx     context.Context
-	pClient *gophercloud.ProviderClient
-	opts    gophercloud.EndpointOpts
+	ctx           context.Context
+	pClient       *gophercloud.ProviderClient
+	opts          gophercloud.EndpointOpts
+	storageClient *gophercloud.ServiceClient
+	computeClient *gophercloud.ServiceClient
+	imageClient   *gophercloud.ServiceClient
 }
 
 // NewClient will generate a GopherCloud client
@@ -43,6 +65,7 @@ func NewClient(ctx context.Context, endpoint string, region string, secret *core
 	if !ok {
 		return nil, fmt.Errorf("no domain_name provided in secret %s", secret.Name)
 	}
+
 	authOpts := gophercloud.AuthOptions{
 		IdentityEndpoint: endpoint,
 		Username:         string(username),
@@ -59,10 +82,27 @@ func NewClient(ctx context.Context, endpoint string, region string, secret *core
 		return nil, fmt.Errorf("error authenticated client: %v", err)
 	}
 
+	storageClient, err := openstack.NewBlockStorageV3(client, endPointOpts)
+	if err != nil {
+		return nil, fmt.Errorf("error generating storage client: %v", err)
+	}
+
+	computeClient, err := openstack.NewComputeV2(client, endPointOpts)
+	if err != nil {
+		return nil, fmt.Errorf("error generating compute client: %v", err)
+	}
+
+	imageClient, err := openstack.NewImageServiceV2(client, endPointOpts)
+	if err != nil {
+		return nil, fmt.Errorf("error generating image client: %v", err)
+	}
 	return &Client{
-		ctx:     ctx,
-		pClient: client,
-		opts:    endPointOpts,
+		ctx:           ctx,
+		pClient:       client,
+		opts:          endPointOpts,
+		storageClient: storageClient,
+		computeClient: computeClient,
+		imageClient:   imageClient,
 	}, nil
 }
 
@@ -97,19 +137,180 @@ func (c *Client) Verify() error {
 }
 
 func (c *Client) ExportVirtualMachine(vm *importjob.VirtualMachine) error {
-	return nil
+	vmObj, err := c.findVM(vm.Spec.VirtualMachineName)
+	if err != nil {
+		return err
+	}
+
+	tmpDir, err := ioutil.TempDir("/tmp", "openstack-image-")
+	if err != nil {
+		return fmt.Errorf("error creating tmp image directory: %v", err)
+	}
+
+	for i, v := range vmObj.AttachedVolumes {
+		// create snapshot for volume
+		snapInfo, err := snapshots.Create(c.storageClient, snapshots.CreateOpts{
+			Name:     fmt.Sprintf("import-controller-%v-%d", vm.Spec.VirtualMachineName, i),
+			VolumeID: v.ID,
+			Force:    true,
+		}).Extract()
+
+		// snapshot creation is async, so call returns a 202 error when successful.
+		// this is ignored
+		if err != nil {
+			return err
+		}
+
+		for i := 0; i < defaultCount; i++ {
+			snapObj, err := snapshots.Get(c.storageClient, snapInfo.ID).Extract()
+			if err != nil {
+				return err
+			}
+
+			logrus.Info(snapObj)
+			if snapObj.Status == "available" {
+				break
+			}
+			time.Sleep(defaultInterval)
+		}
+
+		volObj, err := volumes.Create(c.storageClient, volumes.CreateOpts{
+			SnapshotID: snapInfo.ID,
+			Size:       snapInfo.Size,
+		}).Extract()
+		if err != nil {
+			return err
+		}
+
+		logrus.Info(volObj)
+
+		for i := 0; i < defaultCount; i++ {
+			tmpVolObj, err := volumes.Get(c.storageClient, volObj.ID).Extract()
+			if err != nil {
+				return err
+			}
+			if tmpVolObj.Status == "available" {
+				break
+			}
+			time.Sleep(defaultInterval)
+		}
+
+		logrus.Info("attempting to create new image from volume")
+
+		volImage, err := volumeactions.UploadImage(c.storageClient, volObj.ID, volumeactions.UploadImageOpts{
+			ImageName:  fmt.Sprintf("import-controller-%s", vm.Spec.VirtualMachineName),
+			DiskFormat: "qcow2",
+		}).Extract()
+
+		// wait for image to be ready
+		for i := 0; i < defaultCount; i++ {
+			imgObj, err := images.Get(c.imageClient, volImage.ImageID).Extract()
+			if err != nil {
+				return fmt.Errorf("error checking status of volume image: %v", err)
+			}
+			if imgObj.Status == "active" {
+				break
+			}
+			time.Sleep(defaultInterval)
+		}
+
+		contents, err := imagedata.Download(c.imageClient, volImage.ImageID).Extract()
+		if err != nil {
+			return err
+		}
+
+		imageContents, err := ioutil.ReadAll(contents)
+		if err != nil {
+			return err
+		}
+
+		qcowFileName := filepath.Join(tmpDir, fmt.Sprintf("%s-%d", vm.Name, i))
+		imgFile, err := os.Create(qcowFileName)
+		if err != nil {
+			return fmt.Errorf("error creating disk file: %v", err)
+		}
+
+		_, err = imgFile.Write(imageContents)
+		if err != nil {
+			return err
+		}
+		imgFile.Close()
+
+		// downloaded image is qcow2. Convert to raw file
+		rawFileName := filepath.Join(server.TempDir(), fmt.Sprintf("%s-%d.img", vmObj.Name, i))
+		err = qemu.ConvertQCOW2toRAW(qcowFileName, rawFileName)
+		if err != nil {
+			return fmt.Errorf("error converting qcow2 to raw file: %v", err)
+		}
+
+		if err := volumes.Delete(c.storageClient, volObj.ID, volumes.DeleteOpts{}).ExtractErr(); err != nil {
+			return fmt.Errorf("error deleting volume %s: %v", volObj.ID, err)
+		}
+
+		if err := snapshots.Delete(c.storageClient, snapInfo.ID).ExtractErr(); err != nil {
+			return fmt.Errorf("error deleting snapshot %s: %v", snapInfo.ID, err)
+		}
+
+		if err := images.Delete(c.imageClient, volImage.ImageID).ExtractErr(); err != nil {
+			return fmt.Errorf("error deleting image %s: %v", volImage.ImageID, err)
+		}
+
+		vm.Status.DiskImportStatus = append(vm.Status.DiskImportStatus, importjob.DiskInfo{
+			Name:          fmt.Sprintf("%s-%d.img", vmObj.Name, i),
+			DiskSize:      int64(volObj.Size),
+			DiskLocalPath: server.TempDir(),
+		})
+	}
+	return os.RemoveAll(tmpDir)
 }
 
 func (c *Client) PowerOffVirtualMachine(vm *importjob.VirtualMachine) error {
+	computeClient, err := openstack.NewComputeV2(c.pClient, c.opts)
+	if err != nil {
+		return fmt.Errorf("error generating compute client during poweroffvirtualmachine: %v", err)
+	}
+	uuid, err := c.checkOrGetUUID(vm.Spec.VirtualMachineName)
+	if err != nil {
+		return err
+	}
+
+	ok, err := c.IsPoweredOff(vm)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return startstop.Stop(computeClient, uuid).ExtractErr()
+	}
 	return nil
 }
 
 func (c *Client) IsPoweredOff(vm *importjob.VirtualMachine) (bool, error) {
+
+	s, err := c.findVM(vm.Spec.VirtualMachineName)
+	if err != nil {
+		return false, err
+	}
+
+	if s.Status == "SHUTOFF" {
+		return true, nil
+	}
+
 	return false, nil
 }
 
 func (c *Client) GenerateVirtualMachine(vm *importjob.VirtualMachine) (*kubevirt.VirtualMachine, error) {
+	vmObj, err := c.findVM(vm.Spec.VirtualMachineName)
+	if err != nil {
+		return nil, fmt.Errorf("error finding vm in generatevirtualmachine: %v", err)
+	}
 
+	flavorObj, err := flavors.Get(c.computeClient, vmObj.Flavor["id"].(string)).Extract()
+	if err != nil {
+		return nil, fmt.Errorf("error looking up flavor: %v", err)
+	}
+	logrus.Info(flavorObj.RAM)
+	logrus.Info(flavorObj.VCPUs)
+	logrus.Info(vmObj.Addresses)
 	return nil, nil
 }
 
@@ -168,4 +369,55 @@ func SetupOpenstackSourceFromEnv() (string, string, error) {
 	}
 
 	return endpoint, region, nil
+}
+
+// checkOrGetUUID will check if input is a valid uuid. If not, it assume that the given input
+// is a servername and will try and find a uuid for this server.
+// openstack allows multiple server names to have the same name, in which case an error will be returned
+func (c *Client) checkOrGetUUID(input string) (string, error) {
+	parsedUuid, err := uuid.Parse(input)
+	if err == nil {
+		return parsedUuid.String(), nil
+	}
+
+	// assume this is a name and find server based on name
+	/*computeClient, err := openstack.NewComputeV2(c.pClient, c.opts)
+	if err != nil {
+		return "", fmt.Errorf("error generating compute client during checkorGetUUID: %v", err)
+	}*/
+
+	pg := servers.List(c.computeClient, servers.ListOpts{Name: input})
+	allPg, err := pg.AllPages()
+	if err != nil {
+		return "", fmt.Errorf("error generating all pages in checkorgetuuid :%v", err)
+	}
+
+	ok, err := allPg.IsEmpty()
+	if err != nil {
+		return "", fmt.Errorf("error checking if pages were empty in checkorgetuuid: %v", err)
+	}
+
+	if ok {
+		return "", fmt.Errorf(NotServerFound)
+	}
+
+	allServers, err := servers.ExtractServers(allPg)
+	if err != nil {
+		return "", fmt.Errorf("error extracting servers in checkorgetuuid:%v", err)
+	}
+
+	if len(allServers) > 1 {
+		return "", fmt.Errorf(NotUniqueName)
+	}
+
+	return allServers[0].ID, nil
+}
+
+func (c *Client) findVM(name string) (*servers.Server, error) {
+	parsedUuid, err := c.checkOrGetUUID(name)
+	if err != nil {
+		return nil, err
+	}
+	return servers.Get(c.computeClient, parsedUuid).Extract()
+
 }

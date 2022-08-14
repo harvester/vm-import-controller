@@ -2,6 +2,7 @@ package integration
 
 import (
 	"fmt"
+
 	"github.com/harvester/vm-import-controller/pkg/source/openstack"
 
 	source "github.com/harvester/vm-import-controller/pkg/apis/source.harvesterhci.io/v1beta1"
@@ -77,8 +78,6 @@ var _ = Describe("verify vmware is ready", func() {
 			if err != nil {
 				return err
 			}
-
-			logrus.Info(vcsimObj.Status.Conditions)
 			if util.ConditionExists(vcsimObj.Status.Conditions, source.ClusterReadyCondition, corev1.ConditionTrue) &&
 				util.ConditionExists(vcsimObj.Status.Conditions, source.ClusterErrorCondition, corev1.ConditionFalse) {
 				return nil
@@ -287,6 +286,22 @@ var _ = FDescribe("verify openstack is ready", func() {
 				return nil
 			}
 			return fmt.Errorf("source currently in state: %v, expected to be %s", oObj.Status.Status, source.ClusterReady)
+		}, "30s", "5s").ShouldNot(HaveOccurred())
+
+		// check conditions on source object
+		Eventually(func() error {
+			oObj := &source.Openstack{}
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: o.Name,
+				Namespace: o.Namespace}, oObj)
+			if err != nil {
+				return err
+			}
+			if util.ConditionExists(oObj.Status.Conditions, source.ClusterReadyCondition, corev1.ConditionTrue) &&
+				util.ConditionExists(oObj.Status.Conditions, source.ClusterErrorCondition, corev1.ConditionFalse) {
+				return nil
+			}
+
+			return fmt.Errorf("expected source to have condition %s as %v", source.ClusterReadyCondition, corev1.ConditionTrue)
 		}, "30s", "5s").ShouldNot(HaveOccurred())
 	})
 	AfterEach(func() {
