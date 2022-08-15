@@ -243,7 +243,7 @@ var _ = Describe("verify vmware has invalid DC", func() {
 
 })
 
-var _ = FDescribe("verify openstack is ready", func() {
+var _ = Describe("verify openstack is ready", func() {
 	var creds *corev1.Secret
 	var o *source.Openstack
 

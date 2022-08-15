@@ -9,6 +9,7 @@ import (
 	"github.com/harvester/vm-import-controller/pkg/qemu"
 	"github.com/harvester/vm-import-controller/pkg/server"
 	"io/ioutil"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"os"
 	"path/filepath"
 	"time"
@@ -167,7 +168,6 @@ func (c *Client) ExportVirtualMachine(vm *importjob.VirtualMachine) error {
 				return err
 			}
 
-			logrus.Info(snapObj)
 			if snapObj.Status == "available" {
 				break
 			}
@@ -198,7 +198,7 @@ func (c *Client) ExportVirtualMachine(vm *importjob.VirtualMachine) error {
 		logrus.Info("attempting to create new image from volume")
 
 		volImage, err := volumeactions.UploadImage(c.storageClient, volObj.ID, volumeactions.UploadImageOpts{
-			ImageName:  fmt.Sprintf("import-controller-%s", vm.Spec.VirtualMachineName),
+			ImageName:  fmt.Sprintf("import-controller-%s-%d", vm.Spec.VirtualMachineName, i),
 			DiskFormat: "qcow2",
 		}).Extract()
 
@@ -224,7 +224,7 @@ func (c *Client) ExportVirtualMachine(vm *importjob.VirtualMachine) error {
 			return err
 		}
 
-		qcowFileName := filepath.Join(tmpDir, fmt.Sprintf("%s-%d", vm.Name, i))
+		qcowFileName := filepath.Join(tmpDir, fmt.Sprintf("%s-%d", vm.Spec.VirtualMachineName, i))
 		imgFile, err := os.Create(qcowFileName)
 		if err != nil {
 			return fmt.Errorf("error creating disk file: %v", err)
@@ -308,10 +308,106 @@ func (c *Client) GenerateVirtualMachine(vm *importjob.VirtualMachine) (*kubevirt
 	if err != nil {
 		return nil, fmt.Errorf("error looking up flavor: %v", err)
 	}
-	logrus.Info(flavorObj.RAM)
-	logrus.Info(flavorObj.VCPUs)
-	logrus.Info(vmObj.Addresses)
-	return nil, nil
+
+	var networks []networkInfo
+	for network, values := range vmObj.Addresses {
+		valArr, ok := values.([]interface{})
+		if !ok {
+			return nil, fmt.Errorf("error asserting interface []interface")
+		}
+		for _, v := range valArr {
+			valMap, ok := v.(map[string]interface{})
+			if !ok {
+				return nil, fmt.Errorf("error asserting network array element into map[string]string")
+			}
+			networks = append(networks, networkInfo{
+				NetworkName: network,
+				MAC:         valMap["OS-EXT-IPS-MAC:mac_addr"].(string),
+			})
+		}
+	}
+	newVM := &kubevirt.VirtualMachine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      vm.Spec.VirtualMachineName,
+			Namespace: vm.Namespace,
+		},
+	}
+
+	vmSpec := kubevirt.VirtualMachineSpec{
+		RunStrategy: &[]kubevirt.VirtualMachineRunStrategy{kubevirt.RunStrategyRerunOnFailure}[0],
+		Template: &kubevirt.VirtualMachineInstanceTemplateSpec{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					"harvesterhci.io/vmName": vm.Spec.VirtualMachineName,
+				},
+			},
+			Spec: kubevirt.VirtualMachineInstanceSpec{
+				Domain: kubevirt.DomainSpec{
+					CPU: &kubevirt.CPU{
+						Cores:   uint32(flavorObj.VCPUs),
+						Sockets: uint32(1),
+						Threads: 1,
+					},
+					Memory: &kubevirt.Memory{
+						Guest: &[]resource.Quantity{resource.MustParse(fmt.Sprintf("%dM", flavorObj.RAM))}[0],
+					},
+					Resources: kubevirt.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dM", flavorObj.RAM)),
+							corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", flavorObj.VCPUs)),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	var networkConfig []kubevirt.Network
+	mappedNetwork := mapNetworkCards(networks, vm.Spec.Mapping)
+	for i, v := range mappedNetwork {
+		networkConfig = append(networkConfig, kubevirt.Network{
+			NetworkSource: kubevirt.NetworkSource{
+				Multus: &kubevirt.MultusNetwork{
+					NetworkName: v.MappedNetwork,
+				},
+			},
+			Name: fmt.Sprintf("migrated-%d", i),
+		})
+	}
+
+	var interfaces []kubevirt.Interface
+	for i, v := range mappedNetwork {
+		interfaces = append(interfaces, kubevirt.Interface{
+			Name:       fmt.Sprintf("migrated-%d", i),
+			MacAddress: v.MAC,
+			Model:      "virtio",
+			InterfaceBindingMethod: kubevirt.InterfaceBindingMethod{
+				Bridge: &kubevirt.InterfaceBridge{},
+			},
+		})
+	}
+	// if there is no network, attach to Pod network. Essential for VM to be booted up
+	if len(networkConfig) == 0 {
+		networkConfig = append(networkConfig, kubevirt.Network{
+			Name: "pod-network",
+			NetworkSource: kubevirt.NetworkSource{
+				Pod: &kubevirt.PodNetwork{},
+			},
+		})
+		interfaces = append(interfaces, kubevirt.Interface{
+			Name:  "pod-network",
+			Model: "virtio",
+			InterfaceBindingMethod: kubevirt.InterfaceBindingMethod{
+				Masquerade: &kubevirt.InterfaceMasquerade{},
+			},
+		})
+	}
+
+	vmSpec.Template.Spec.Networks = networkConfig
+	vmSpec.Template.Spec.Domain.Devices.Interfaces = interfaces
+	newVM.Spec = vmSpec
+	// disk attachment needs query by core controller for storage classes, so will be added by the importjob controller
+	return newVM, nil
 }
 
 // SetupOpenStackSecretFromEnv is a helper function to ease with testing
@@ -420,4 +516,24 @@ func (c *Client) findVM(name string) (*servers.Server, error) {
 	}
 	return servers.Get(c.computeClient, parsedUuid).Extract()
 
+}
+
+type networkInfo struct {
+	NetworkName   string
+	MAC           string
+	MappedNetwork string
+}
+
+func mapNetworkCards(networkCards []networkInfo, mapping []importjob.NetworkMapping) []networkInfo {
+	var retNetwork []networkInfo
+	for _, nc := range networkCards {
+		for _, m := range mapping {
+			if m.SourceNetwork == nc.NetworkName {
+				nc.MappedNetwork = m.DestinationNetwork
+				retNetwork = append(retNetwork, nc)
+			}
+		}
+	}
+
+	return retNetwork
 }
