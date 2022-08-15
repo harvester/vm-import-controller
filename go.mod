@@ -3,6 +3,7 @@ module github.com/harvester/vm-import-controller
 go 1.18
 
 require (
+	github.com/gophercloud/gophercloud v0.7.0
 	github.com/harvester/harvester v1.0.2
 	github.com/onsi/ginkgo/v2 v2.1.4
 	github.com/onsi/gomega v1.19.0

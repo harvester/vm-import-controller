@@ -49,9 +49,9 @@ func SetupVMware(ctx context.Context, k8sClient client.Client) error {
 	}
 
 	fnList := []applyObject{
-		setupSecret,
-		setupSource,
-		setupVMExport,
+		setupVmwareSecret,
+		setupVmwareSource,
+		setupVmwareVMExport,
 	}
 
 	for _, v := range fnList {
@@ -63,7 +63,7 @@ func SetupVMware(ctx context.Context, k8sClient client.Client) error {
 	return nil
 }
 
-func setupSecret(ctx context.Context, k8sClient client.Client) error {
+func setupVmwareSecret(ctx context.Context, k8sClient client.Client) error {
 	username, ok := os.LookupEnv("GOVC_USERNAME")
 	if !ok {
 		return fmt.Errorf("env variable GOVC_USERNAME not set")
@@ -87,7 +87,7 @@ func setupSecret(ctx context.Context, k8sClient client.Client) error {
 	return k8sClient.Create(ctx, s)
 }
 
-func setupSource(ctx context.Context, k8sClient client.Client) error {
+func setupVmwareSource(ctx context.Context, k8sClient client.Client) error {
 	endpoint, ok := os.LookupEnv("GOVC_URL")
 	if !ok {
 		return fmt.Errorf("env variable GOVC_URL not set")
@@ -117,7 +117,7 @@ func setupSource(ctx context.Context, k8sClient client.Client) error {
 
 }
 
-func setupVMExport(ctx context.Context, k8sClient client.Client) error {
+func setupVmwareVMExport(ctx context.Context, k8sClient client.Client) error {
 	vm, ok := os.LookupEnv("VM_NAME")
 	if !ok {
 		return fmt.Errorf("env variable VM_NAME not specified")

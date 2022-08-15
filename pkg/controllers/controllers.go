@@ -78,6 +78,7 @@ func Register(ctx context.Context, restConfig *rest.Config) error {
 		SharedControllerFactory: scf,
 	})
 	sc.RegisterVmareController(ctx, sourceFactory.Source().V1beta1().Vmware(), coreFactory.Core().V1().Secret())
+	sc.RegisterOpenstackController(ctx, sourceFactory.Source().V1beta1().Openstack(), coreFactory.Core().V1().Secret())
 
 	ic.RegisterVMImportController(ctx, sourceFactory.Source().V1beta1().Vmware(), sourceFactory.Source().V1beta1().Openstack(),
 		coreFactory.Core().V1().Secret(), importJobFactory.Importjob().V1beta1().VirtualMachine(),
