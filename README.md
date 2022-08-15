@@ -51,6 +51,45 @@ NAME      STATUS
 vcsim   clusterReady
 ```
 
+For openstack based source clusters a sample definition is as follows:
+
+```yaml
+apiVersion: source.harvesterhci.io/v1beta1
+kind: Openstack
+metadata:
+  name: devstack
+  namespace: default
+spec:
+  endpoint: "https://devstack/identity"
+  region: "RegionOne"
+  credentials:
+    name: devstack-credentials
+    namespace: default
+```
+
+The secret contains the credentials for the vcenter endpoint:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata: 
+  name: devstack-credentials
+  namespace: default
+stringData:
+  "username": "user"
+  "password": "password"
+  "project_name": "admin"
+  "domain_name": "default"
+```
+
+Openstack source reconcile process, attempts to list VM's in the project, and marks the source as ready
+
+```shell
+$ kubectl get openstack.source
+NAME       STATUS
+devstack   clusterReady
+```
+
 ### ImportJob
 The ImportJob crd provides a way for users to define the source VM and mapping to the actual source cluster to perform the VM export-import from.
 
@@ -88,7 +127,60 @@ Once the virtual machine has been imported successfully the object will reflect 
 
 ```shell
 $ kubectl get virtualmachine.importjob
-NAME                 STATUS
-alpine-export-test   virtualMachineRunning
+NAME                    STATUS
+alpine-export-test      virtualMachineRunning
+openstack-cirros-test   virtualMachineRunning
+
 ```
 
+Similarly, users can define a VirtualMachine importjob for Openstack source as well:
+
+```yaml
+apiVersion: importjob.harvesterhci.io/v1beta1
+kind: VirtualMachine
+metadata:
+  name: openstack-demo
+  namespace: default
+spec: 
+  virtualMachineName: "openstack-demo" #Name or UUID for instance
+  networkMapping:
+  - sourceNetwork: "shared"
+    destinationNetwork: "default/vlan1"
+  - sourceNetwork: "public"
+    destinationNetwork: "default/vlan2"
+  sourceCluster: 
+    name: devstack
+    namespace: default
+    kind: Openstack
+    apiVersion: source.harvesterhci.io/v1beta1
+```
+
+*NOTE:* Openstack allows users to have multiple instances with the same name. In such a scenario the users are advised to use the Instance ID. The reconcile logic tries to perform a lookup from name to ID when a name is used.
+
+
+## Testing
+Currently basic integration tests are available under `tests/integration`
+
+However a lot of these tests need access to a working Harvester, Openstack and Vmware cluster.
+
+The integration tests can be setup by using the following environment variables to point the tests to a working environment to perform the actual vm migration tests
+
+```shell
+export GOVC_PASSWORD="vsphere-password"
+export GOVC_USERNAME="vsphere-username"
+export GOVC_URL="https://vcenter/sdk"
+export GOVC_DATACENTER="vsphere-datacenter"
+#The controller exposes the converted disks via a http endpoint and leverages the download capability of longhorn backing images
+# the SVC address needs to be the address of node where integration tests are running and should be reachable from harvester cluster
+export SVC_ADDRESS="address for node" 
+export VM_NAME="vmware-export-test-vm-name"
+export USE_EXISTING_CLUSTER=true
+export OS_AUTH_URL="openstack/identity" #Keystone endpoint
+export OS_PROJECT_NAME="openstack-project-name"
+export OS_USER_DOMAIN_NAME="openstack-user-domain"
+export OS_USERNAME="openstack-username"
+export OS_PASSWORD="openstack-password"
+export OS_VM_NAME="openstack-export-test-vm-name"
+export OS_REGION_NAME="openstack-region"
+export KUBECONFIG="kubeconfig-for-harvester-cluster"
+```

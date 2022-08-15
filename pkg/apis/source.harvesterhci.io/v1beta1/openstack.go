@@ -22,7 +22,7 @@ type Openstack struct {
 
 type OpenstackSpec struct {
 	EndpointAddress string                 `json:"endpoint"`
-	Region          string                 `json:"dc"`
+	Region          string                 `json:"region"`
 	Credentials     corev1.SecretReference `json:"credentials"`
 }
 
