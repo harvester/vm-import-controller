@@ -80,6 +80,7 @@ stringData:
   "password": "password"
   "project_name": "admin"
   "domain_name": "default"
+  "ca_cert": "pem-encoded-ca-cert"
 ```
 
 Openstack source reconcile process, attempts to list VM's in the project, and marks the source as ready
