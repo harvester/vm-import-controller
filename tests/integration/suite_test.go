@@ -111,7 +111,7 @@ var _ = BeforeSuite(func() {
 	pool, err = dockertest.NewPool("")
 	Expect(err).NotTo(HaveOccurred())
 	runOpts := &dockertest.RunOptions{
-		Name:       "vcsim",
+		Name:       "vcsim-integration",
 		Repository: "vmware/vcsim",
 		Tag:        "v0.29.0",
 	}
@@ -127,8 +127,10 @@ var _ = BeforeSuite(func() {
 
 var _ = AfterSuite(func() {
 	By("tearing down the test environment")
-	err := pool.Purge(vcsimMock)
-	Expect(err).NotTo(HaveOccurred())
+	if vcsimMock != nil {
+		err := pool.Purge(vcsimMock)
+		Expect(err).NotTo(HaveOccurred())
+	}
 	egctx.Done()
 	cancel()
 	testEnv.Stop()

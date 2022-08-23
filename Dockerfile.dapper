@@ -1,0 +1,21 @@
+FROM golang:1.18
+
+ARG DAPPER_HOST_ARCH
+ENV ARCH $DAPPER_HOST_ARCH
+
+RUN export K8S_VERSION=1.24.2 && \
+    curl -sSLo envtest-bins.tar.gz "https://go.kubebuilder.io/test-tools/${K8S_VERSION}/$(go env GOOS)/$(go env GOARCH)" && \
+    mkdir /usr/local/kubebuilder && \
+    tar -C /usr/local/kubebuilder --strip-components=1 -zvxf envtest-bins.tar.gz
+RUN apt update && \
+    apt install -y bash git gcc docker.io vim less file curl wget ca-certificates qemu-utils
+
+ENV DAPPER_ENV REPO TAG DRONE_TAG CROSS
+ENV DAPPER_SOURCE /go/src/github.com/harvester/vm-import-controller
+ENV DAPPER_OUTPUT ./bin
+ENV DAPPER_DOCKER_SOCKET true
+ENV DAPPER_RUN_ARGS "--network=host"
+WORKDIR ${DAPPER_SOURCE}
+
+ENTRYPOINT ["./scripts/entry"]
+CMD ["ci"]

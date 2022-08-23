@@ -149,6 +149,12 @@ func Test_IsPoweredOff(t *testing.T) {
 
 // Test_ExportVirtualMachine needs to reference a real vcenter as the vcsim doesnt support ovf export functionality
 func Test_ExportVirtualMachine(t *testing.T) {
+	// skip as vscim doesnt implement the same
+	_, ok := os.LookupEnv("USE_EXISTING")
+	if !ok {
+		return
+	}
+
 	ctx := context.TODO()
 	assert := require.New(t)
 	govc_url := os.Getenv("GOVC_URL")

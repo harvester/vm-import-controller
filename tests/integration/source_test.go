@@ -249,6 +249,9 @@ var _ = Describe("verify openstack is ready", func() {
 
 	const secretName = "devstack"
 	BeforeEach(func() {
+		if !useExisting {
+			return
+		}
 		var err error
 		creds, err = openstack.SetupOpenstackSecretFromEnv(secretName)
 		Expect(err).ToNot(HaveOccurred())
@@ -276,6 +279,10 @@ var _ = Describe("verify openstack is ready", func() {
 	})
 
 	It("check openstack source is ready", func() {
+		if !useExisting {
+			Skip("skipping openstack integration tests as not using an existing environment")
+		}
+
 		Eventually(func() error {
 			oObj := &source.Openstack{}
 			err := k8sClient.Get(ctx, types.NamespacedName{Name: o.Name, Namespace: o.Namespace}, oObj)
@@ -305,6 +312,9 @@ var _ = Describe("verify openstack is ready", func() {
 		}, "30s", "5s").ShouldNot(HaveOccurred())
 	})
 	AfterEach(func() {
+		if !useExisting {
+			return
+		}
 		err := k8sClient.Delete(ctx, creds)
 		Expect(err).ToNot(HaveOccurred())
 		err = k8sClient.Delete(ctx, o)

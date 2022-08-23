@@ -2,6 +2,8 @@ package openstack
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"github.com/gophercloud/gophercloud/openstack/blockstorage/extensions/volumeactions"
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/flavors"
@@ -10,6 +12,7 @@ import (
 	"github.com/harvester/vm-import-controller/pkg/server"
 	"io/ioutil"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -67,6 +70,19 @@ func NewClient(ctx context.Context, endpoint string, region string, secret *core
 		return nil, fmt.Errorf("no domain_name provided in secret %s", secret.Name)
 	}
 
+	config := &tls.Config{}
+
+	customCA, ok := secret.Data["ca_cert"]
+	if ok {
+		caCertPool := x509.NewCertPool()
+		caCertPool.AppendCertsFromPEM(customCA)
+		config.RootCAs = caCertPool
+	} else {
+		config.InsecureSkipVerify = true
+	}
+
+	tr := &http.Transport{TLSClientConfig: config}
+
 	authOpts := gophercloud.AuthOptions{
 		IdentityEndpoint: endpoint,
 		Username:         string(username),
@@ -78,7 +94,13 @@ func NewClient(ctx context.Context, endpoint string, region string, secret *core
 	endPointOpts := gophercloud.EndpointOpts{
 		Region: region,
 	}
-	client, err := openstack.AuthenticatedClient(authOpts)
+
+	client, err := openstack.NewClient(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("error generating new client: %v", err)
+	}
+	client.HTTPClient.Transport = tr
+	err = openstack.Authenticate(client, authOpts)
 	if err != nil {
 		return nil, fmt.Errorf("error authenticated client: %v", err)
 	}
@@ -202,6 +224,9 @@ func (c *Client) ExportVirtualMachine(vm *importjob.VirtualMachine) error {
 			DiskFormat: "qcow2",
 		}).Extract()
 
+		if err != nil {
+			return err
+		}
 		// wait for image to be ready
 		for i := 0; i < defaultCount; i++ {
 			imgObj, err := images.Get(c.imageClient, volImage.ImageID).Extract()
