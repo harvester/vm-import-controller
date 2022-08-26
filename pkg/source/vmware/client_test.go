@@ -3,12 +3,12 @@ package vmware
 import (
 	"context"
 	"fmt"
+	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"log"
 	"os"
 	"testing"
 	"time"
 
-	importjob "github.com/harvester/vm-import-controller/pkg/apis/importjob.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/server"
 	"github.com/ory/dockertest/v3"
 	"github.com/stretchr/testify/require"
@@ -95,12 +95,12 @@ func Test_PowerOffVirtualMachine(t *testing.T) {
 	err = c.Verify()
 	assert.NoError(err, "expected no error during verification of client")
 
-	vm := &importjob.VirtualMachine{
+	vm := &migration.VirtualMachineImport{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "demo",
 			Namespace: "default",
 		},
-		Spec: importjob.VirtualMachineImportSpec{
+		Spec: migration.VirtualMachineImportSpec{
 			SourceCluster:      corev1.ObjectReference{},
 			VirtualMachineName: "DC0_H0_VM0",
 		},
@@ -131,12 +131,12 @@ func Test_IsPoweredOff(t *testing.T) {
 	err = c.Verify()
 	assert.NoError(err, "expected no error during verification of client")
 
-	vm := &importjob.VirtualMachine{
+	vm := &migration.VirtualMachineImport{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "demo",
 			Namespace: "default",
 		},
-		Spec: importjob.VirtualMachineImportSpec{
+		Spec: migration.VirtualMachineImportSpec{
 			SourceCluster:      corev1.ObjectReference{},
 			VirtualMachineName: "DC0_H0_VM0",
 		},
@@ -187,12 +187,12 @@ func Test_ExportVirtualMachine(t *testing.T) {
 	err = c.Verify()
 	assert.NoError(err, "expected no error during verification of client")
 
-	vm := &importjob.VirtualMachine{
+	vm := &migration.VirtualMachineImport{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "demo",
 			Namespace: "default",
 		},
-		Spec: importjob.VirtualMachineImportSpec{
+		Spec: migration.VirtualMachineImportSpec{
 			SourceCluster:      corev1.ObjectReference{},
 			VirtualMachineName: vm_name,
 		},
@@ -226,15 +226,15 @@ func Test_GenerateVirtualMachine(t *testing.T) {
 	err = c.Verify()
 	assert.NoError(err, "expected no error during verification of client")
 
-	vm := &importjob.VirtualMachine{
+	vm := &migration.VirtualMachineImport{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "demo",
 			Namespace: "default",
 		},
-		Spec: importjob.VirtualMachineImportSpec{
+		Spec: migration.VirtualMachineImportSpec{
 			SourceCluster:      corev1.ObjectReference{},
 			VirtualMachineName: "DC0_H0_VM0",
-			Mapping: []importjob.NetworkMapping{
+			Mapping: []migration.NetworkMapping{
 				{
 					SourceNetwork:      "DVSwitch: fea97929-4b2d-5972-b146-930c6d0b4014",
 					DestinationNetwork: "default/vlan",
@@ -283,7 +283,7 @@ func Test_identifyNetworkCards(t *testing.T) {
 
 	networkInfo := identifyNetworkCards(o.Config.Hardware.Device)
 	assert.Len(networkInfo, 1, "expected to find only 1 item in the networkInfo")
-	networkMapping := []importjob.NetworkMapping{
+	networkMapping := []migration.NetworkMapping{
 		{
 			SourceNetwork:      "dummyNetwork",
 			DestinationNetwork: "harvester1",
@@ -297,7 +297,7 @@ func Test_identifyNetworkCards(t *testing.T) {
 	mappedInfo := mapNetworkCards(networkInfo, networkMapping)
 	assert.Len(mappedInfo, 1, "expected to find only 1 item in the mapped networkinfo")
 
-	noNetworkMapping := []importjob.NetworkMapping{}
+	noNetworkMapping := []migration.NetworkMapping{}
 	noMappedInfo := mapNetworkCards(networkInfo, noNetworkMapping)
 	assert.Len(noMappedInfo, 0, "expected to find no item in the mapped networkinfo")
 }

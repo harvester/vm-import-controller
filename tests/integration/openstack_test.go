@@ -3,8 +3,7 @@ package integration
 import (
 	"fmt"
 	harvesterv1beta1 "github.com/harvester/harvester/pkg/apis/harvesterhci.io/v1beta1"
-	importjob "github.com/harvester/vm-import-controller/pkg/apis/importjob.harvesterhci.io/v1beta1"
-	source "github.com/harvester/vm-import-controller/pkg/apis/source.harvesterhci.io/v1beta1"
+	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/util"
 	"github.com/harvester/vm-import-controller/tests/setup"
 	. "github.com/onsi/ginkgo/v2"
@@ -29,16 +28,16 @@ var _ = Describe("test openstack export/import integration", func() {
 			Skip("skipping openstack integration tests as not using an existing environment")
 		}
 
-		By("checking if openstack source is ready", func() {
+		By("checking if openstack migration is ready", func() {
 			Eventually(func() error {
-				o := &source.Openstack{}
+				o := &migration.OpenstackSource{}
 				err := k8sClient.Get(ctx, setup.OpenstackSourceNamespacedName, o)
 				if err != nil {
 					return err
 				}
 
-				if o.Status.Status != source.ClusterReady {
-					return fmt.Errorf("waiting for cluster source to be ready. current status is %s", o.Status.Status)
+				if o.Status.Status != migration.ClusterReady {
+					return fmt.Errorf("waiting for cluster migration to be ready. current status is %s", o.Status.Status)
 				}
 				return nil
 			}, "30s", "10s").ShouldNot(HaveOccurred())
@@ -46,20 +45,20 @@ var _ = Describe("test openstack export/import integration", func() {
 
 		By("vm importjob has the correct conditions", func() {
 			Eventually(func() error {
-				v := &importjob.VirtualMachine{}
+				v := &migration.VirtualMachineImport{}
 				err := k8sClient.Get(ctx, setup.OpenstackVMNamespacedName, v)
 				if err != nil {
 					return err
 				}
-				if !util.ConditionExists(v.Status.ImportConditions, importjob.VirtualMachinePoweringOff, v1.ConditionTrue) {
+				if !util.ConditionExists(v.Status.ImportConditions, migration.VirtualMachinePoweringOff, v1.ConditionTrue) {
 					return fmt.Errorf("expected virtualmachinepoweringoff condition to be present")
 				}
 
-				if !util.ConditionExists(v.Status.ImportConditions, importjob.VirtualMachinePoweredOff, v1.ConditionTrue) {
+				if !util.ConditionExists(v.Status.ImportConditions, migration.VirtualMachinePoweredOff, v1.ConditionTrue) {
 					return fmt.Errorf("expected virtualmachinepoweredoff condition to be present")
 				}
 
-				if !util.ConditionExists(v.Status.ImportConditions, importjob.VirtualMachineExported, v1.ConditionTrue) {
+				if !util.ConditionExists(v.Status.ImportConditions, migration.VirtualMachineExported, v1.ConditionTrue) {
 					return fmt.Errorf("expected virtualmachineexported condition to be present")
 				}
 
@@ -69,7 +68,7 @@ var _ = Describe("test openstack export/import integration", func() {
 
 		By("checking that PVC claim has been created", func() {
 			Eventually(func() error {
-				v := &importjob.VirtualMachine{}
+				v := &migration.VirtualMachineImport{}
 				err := k8sClient.Get(ctx, setup.OpenstackVMNamespacedName, v)
 				if err != nil {
 					return err
@@ -100,7 +99,7 @@ var _ = Describe("test openstack export/import integration", func() {
 
 		By("checking that the virtualmachine has been created", func() {
 			Eventually(func() error {
-				v := &importjob.VirtualMachine{}
+				v := &migration.VirtualMachineImport{}
 				err := k8sClient.Get(ctx, setup.OpenstackVMNamespacedName, v)
 				if err != nil {
 					return err
@@ -118,7 +117,7 @@ var _ = Describe("test openstack export/import integration", func() {
 
 		By("checking that the virtualmachineimage ownership has been removed", func() {
 			Eventually(func() error {
-				v := &importjob.VirtualMachine{}
+				v := &migration.VirtualMachineImport{}
 				err := k8sClient.Get(ctx, setup.OpenstackVMNamespacedName, v)
 				if err != nil {
 					return err

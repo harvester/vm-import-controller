@@ -10,22 +10,22 @@ import (
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-type VirtualMachine struct {
+type VirtualMachineImport struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 	Spec              VirtualMachineImportSpec   `json:"spec"`
 	Status            VirtualMachineImportStatus `json:"status,omitempty"`
 }
 
-// VirtualMachineImportSpec is used to create kubevirt VirtualMachines by exporting VM's from source clusters.
+// VirtualMachineImportSpec is used to create kubevirt VirtualMachines by exporting VM's from migration clusters.
 type VirtualMachineImportSpec struct {
 	SourceCluster      corev1.ObjectReference `json:"sourceCluster"`
 	VirtualMachineName string                 `json:"virtualMachineName"`
 	Folder             string                 `json:"folder,omitempty"`
-	Mapping            []NetworkMapping       `json:"networkMapping,omitempty"` //If empty new VirtualMachine will be mapped to Management Network
+	Mapping            []NetworkMapping       `json:"networkMapping,omitempty"` //If empty new VirtualMachineImport will be mapped to Management Network
 }
 
-// VirtualMachineImportStatus tracks the status of the VirtualMachine export from source and import into the Harvester cluster
+// VirtualMachineImportStatus tracks the status of the VirtualMachineImport export from migration and import into the Harvester cluster
 type VirtualMachineImportStatus struct {
 	Status            ImportStatus       `json:"importStatus,omitempty"`
 	DiskImportStatus  []DiskInfo         `json:"diskImportStatus,omitempty"`
@@ -33,7 +33,7 @@ type VirtualMachineImportStatus struct {
 	NewVirtualMachine string             `json:"newVirtualMachine,omitempty"`
 }
 
-// DiskInfo contains the information about associated Disk in the Import source.
+// DiskInfo contains the information about associated Disk in the Import migration.
 // VM's may have multiple disks, and each disk will be represented as a DiskInfo object.
 // DiskInfo is used to track the following tasks
 // * disk format conversion

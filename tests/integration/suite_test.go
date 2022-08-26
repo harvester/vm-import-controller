@@ -6,13 +6,12 @@ import (
 	"testing"
 	"time"
 
-	importjob "github.com/harvester/vm-import-controller/pkg/apis/importjob.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/server"
 
 	"github.com/harvester/vm-import-controller/tests/setup"
 
 	harvesterv1beta1 "github.com/harvester/harvester/pkg/apis/harvesterhci.io/v1beta1"
-	source "github.com/harvester/vm-import-controller/pkg/apis/source.harvesterhci.io/v1beta1"
+	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/controllers"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -71,7 +70,7 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
 
-	err = source.AddToScheme(scheme)
+	err = migration.AddToScheme(scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	err = apiextensions.AddToScheme(scheme)
@@ -84,9 +83,6 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 
 	err = kubevirtv1.AddToScheme(scheme)
-	Expect(err).NotTo(HaveOccurred())
-
-	err = importjob.AddToScheme(scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme})

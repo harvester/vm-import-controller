@@ -1,4 +1,4 @@
-package importjob
+package migration
 
 import (
 	"context"
@@ -16,11 +16,11 @@ import (
 	harvester "github.com/harvester/harvester/pkg/generated/controllers/harvesterhci.io/v1beta1"
 	kubevirtv1 "github.com/harvester/harvester/pkg/generated/controllers/kubevirt.io/v1"
 	"github.com/harvester/vm-import-controller/pkg/apis/common"
-	importjob "github.com/harvester/vm-import-controller/pkg/apis/importjob.harvesterhci.io/v1beta1"
-	source "github.com/harvester/vm-import-controller/pkg/apis/source.harvesterhci.io/v1beta1"
-	importJobController "github.com/harvester/vm-import-controller/pkg/generated/controllers/importjob.harvesterhci.io/v1beta1"
-	sourceController "github.com/harvester/vm-import-controller/pkg/generated/controllers/source.harvesterhci.io/v1beta1"
+	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
+	migrationController "github.com/harvester/vm-import-controller/pkg/generated/controllers/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/server"
+	"github.com/harvester/vm-import-controller/pkg/source/openstack"
+	"github.com/harvester/vm-import-controller/pkg/source/vmware"
 	"github.com/harvester/vm-import-controller/pkg/util"
 	coreControllers "github.com/rancher/wrangler/pkg/generated/controllers/core/v1"
 	"github.com/rancher/wrangler/pkg/relatedresource"
@@ -31,19 +31,33 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
+type VirtualMachineOperations interface {
+	// ExportVirtualMachine is responsible for generating the raw images for each disk associated with the VirtualMachineImport
+	// Any image format conversion will be performed by the VM Operation
+	ExportVirtualMachine(vm *migration.VirtualMachineImport) error
+
+	// PowerOffVirtualMachine is responsible for the powering off the virtualmachine
+	PowerOffVirtualMachine(vm *migration.VirtualMachineImport) error
+
+	// IsPoweredOff will check the status of VM Power and return true if machine is powered off
+	IsPoweredOff(vm *migration.VirtualMachineImport) (bool, error)
+
+	GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*kubevirt.VirtualMachine, error)
+}
+
 type virtualMachineHandler struct {
 	ctx       context.Context
-	vmware    sourceController.VmwareController
-	openstack sourceController.OpenstackController
+	vmware    migrationController.VmwareSourceController
+	openstack migrationController.OpenstackSourceController
 	secret    coreControllers.SecretController
-	importVM  importJobController.VirtualMachineController
+	importVM  migrationController.VirtualMachineImportController
 	vmi       harvester.VirtualMachineImageController
 	kubevirt  kubevirtv1.VirtualMachineController
 	pvc       coreControllers.PersistentVolumeClaimController
 }
 
-func RegisterVMImportController(ctx context.Context, vmware sourceController.VmwareController, openstack sourceController.OpenstackController,
-	secret coreControllers.SecretController, importVM importJobController.VirtualMachineController, vmi harvester.VirtualMachineImageController, kubevirt kubevirtv1.VirtualMachineController, pvc coreControllers.PersistentVolumeClaimController) {
+func RegisterVMImportController(ctx context.Context, vmware migrationController.VmwareSourceController, openstack migrationController.OpenstackSourceController,
+	secret coreControllers.SecretController, importVM migrationController.VirtualMachineImportController, vmi harvester.VirtualMachineImageController, kubevirt kubevirtv1.VirtualMachineController, pvc coreControllers.PersistentVolumeClaimController) {
 
 	vmHandler := &virtualMachineHandler{
 		ctx:       ctx,
@@ -60,7 +74,7 @@ func RegisterVMImportController(ctx context.Context, vmware sourceController.Vmw
 	importVM.OnChange(ctx, "virtualmachine-import-job-change", vmHandler.OnVirtualMachineChange)
 }
 
-func (h *virtualMachineHandler) OnVirtualMachineChange(key string, vm *importjob.VirtualMachine) (*importjob.VirtualMachine, error) {
+func (h *virtualMachineHandler) OnVirtualMachineChange(key string, vm *migration.VirtualMachineImport) (*migration.VirtualMachineImport, error) {
 
 	if vm == nil || vm.DeletionTimestamp != nil {
 		return vm, nil
@@ -72,23 +86,23 @@ func (h *virtualMachineHandler) OnVirtualMachineChange(key string, vm *importjob
 		if err != nil {
 			return vm, err
 		}
-		vm.Status.Status = importjob.SourceReady
+		vm.Status.Status = migration.SourceReady
 		return h.importVM.UpdateStatus(vm)
-	case importjob.SourceReady: //vm source is valid and ready. trigger source specific import
+	case migration.SourceReady: //vm migration is valid and ready. trigger migration specific import
 		err := h.triggerExport(vm)
 		if err != nil {
 			return vm, err
 		}
-		if util.ConditionExists(vm.Status.ImportConditions, importjob.VirtualMachineExported, v1.ConditionTrue) {
-			vm.Status.Status = importjob.DisksExported
+		if util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineExported, v1.ConditionTrue) {
+			vm.Status.Status = migration.DisksExported
 		}
 		return h.importVM.UpdateStatus(vm)
-	case importjob.DisksExported: // prepare and add routes for disks to be used for VirtualMachineImage CRD
+	case migration.DisksExported: // prepare and add routes for disks to be used for VirtualMachineImage CRD
 		orgStatus := vm.Status.DeepCopy()
 		err := h.createVirtualMachineImages(vm)
 		if err != nil {
 			// check if any disks have been updated. We need to save this info to eventually reconcile the VMI creation
-			var newVM *importjob.VirtualMachine
+			var newVM *migration.VirtualMachineImport
 			var newErr error
 			if !reflect.DeepEqual(orgStatus.DiskImportStatus, vm.Status.DiskImportStatus) {
 				newVM, newErr = h.importVM.UpdateStatus(vm)
@@ -102,14 +116,14 @@ func (h *virtualMachineHandler) OnVirtualMachineChange(key string, vm *importjob
 
 		ok := true
 		for _, d := range vm.Status.DiskImportStatus {
-			ok = util.ConditionExists(d.DiskConditions, importjob.VirtualMachineImageSubmitted, v1.ConditionTrue) && ok
+			ok = util.ConditionExists(d.DiskConditions, migration.VirtualMachineImageSubmitted, v1.ConditionTrue) && ok
 		}
 
 		if ok {
-			vm.Status.Status = importjob.DiskImagesSubmitted
+			vm.Status.Status = migration.DiskImagesSubmitted
 		}
 		return h.importVM.UpdateStatus(vm)
-	case importjob.DiskImagesSubmitted:
+	case migration.DiskImagesSubmitted:
 		// check and update disk image status based on VirtualMachineImage watches
 		err := h.reconcileVMIStatus(vm)
 		if err != nil {
@@ -119,11 +133,11 @@ func (h *virtualMachineHandler) OnVirtualMachineChange(key string, vm *importjob
 		failed := false
 		var failedCount, passedCount int
 		for _, d := range vm.Status.DiskImportStatus {
-			ok = util.ConditionExists(d.DiskConditions, importjob.VirtualMachineImageReady, v1.ConditionTrue) && ok
+			ok = util.ConditionExists(d.DiskConditions, migration.VirtualMachineImageReady, v1.ConditionTrue) && ok
 			if ok {
 				passedCount++
 			}
-			failed = util.ConditionExists(d.DiskConditions, importjob.VirtualMachineImageFailed, v1.ConditionTrue) || failed
+			failed = util.ConditionExists(d.DiskConditions, migration.VirtualMachineImageFailed, v1.ConditionTrue) || failed
 			if failed {
 				failedCount++
 			}
@@ -136,42 +150,42 @@ func (h *virtualMachineHandler) OnVirtualMachineChange(key string, vm *importjob
 		}
 
 		if ok {
-			vm.Status.Status = importjob.DiskImagesReady
+			vm.Status.Status = migration.DiskImagesReady
 		}
 
 		if failed {
-			vm.Status.Status = importjob.DiskImagesFailed
+			vm.Status.Status = migration.DiskImagesFailed
 		}
 		return h.importVM.UpdateStatus(vm)
-	case importjob.DiskImagesFailed:
+	case migration.DiskImagesFailed:
 		// re-export VM and trigger re-import again
 		err := h.cleanupAndResubmit(vm)
 		if err != nil {
 			return vm, err
 		}
-		vm.Status.Status = importjob.SourceReady
+		vm.Status.Status = migration.SourceReady
 		return h.importVM.UpdateStatus(vm)
-	case importjob.DiskImagesReady:
+	case migration.DiskImagesReady:
 		// create VM to use the VirtualMachineObject
 		err := h.createVirtualMachine(vm)
 		if err != nil {
 			return vm, err
 		}
-		vm.Status.Status = importjob.VirtualMachineCreated
+		vm.Status.Status = migration.VirtualMachineCreated
 		return h.importVM.UpdateStatus(vm)
-	case importjob.VirtualMachineCreated:
+	case migration.VirtualMachineCreated:
 		// wait for VM to be running using a watch on VM's
 		ok, err := h.checkVirtualMachine(vm)
 		if err != nil {
 			return vm, err
 		}
 		if ok {
-			vm.Status.Status = importjob.VirtualMachineRunning
+			vm.Status.Status = migration.VirtualMachineRunning
 			h.importVM.UpdateStatus(vm)
 		}
 		// by default we will poll again after 5 mins
 		h.importVM.EnqueueAfter(vm.Namespace, vm.Name, 5*time.Minute)
-	case importjob.VirtualMachineRunning:
+	case migration.VirtualMachineRunning:
 		logrus.Infof("vm %s in namespace %v imported successfully", vm.Name, vm.Namespace)
 		return vm, h.tidyUpObjects(vm)
 	}
@@ -179,47 +193,47 @@ func (h *virtualMachineHandler) OnVirtualMachineChange(key string, vm *importjob
 	return vm, nil
 }
 
-// preFlightChecks is used to validate that the associate sources and VM source references are valid
-func (h *virtualMachineHandler) preFlightChecks(vm *importjob.VirtualMachine) error {
-	if vm.Spec.SourceCluster.APIVersion != "source.harvesterhci.io/v1beta1" {
-		return fmt.Errorf("expected source cluster apiversion to be source.harvesterhci.io/v1beta1 but got %s", vm.Spec.SourceCluster.APIVersion)
+// preFlightChecks is used to validate that the associate sources and VM migration references are valid
+func (h *virtualMachineHandler) preFlightChecks(vm *migration.VirtualMachineImport) error {
+	if vm.Spec.SourceCluster.APIVersion != "migration.harvesterhci.io/v1beta1" {
+		return fmt.Errorf("expected migration cluster apiversion to be migration.harvesterhci.io/v1beta1 but got %s", vm.Spec.SourceCluster.APIVersion)
 	}
 
-	var ss source.SourceInterface
+	var ss migration.SourceInterface
 	var err error
 
 	switch strings.ToLower(vm.Spec.SourceCluster.Kind) {
 	case "vmware", "openstack":
 		ss, err = h.generateSource(vm)
 		if err != nil {
-			return fmt.Errorf("error generating source in preflight checks :%v", err)
+			return fmt.Errorf("error generating migration in preflight checks :%v", err)
 		}
 	default:
-		return fmt.Errorf("unsupported source kind. Currently supported values are vmware/openstack but got %s", strings.ToLower(vm.Spec.SourceCluster.Kind))
+		return fmt.Errorf("unsupported migration kind. Currently supported values are vmware/openstack but got %s", strings.ToLower(vm.Spec.SourceCluster.Kind))
 	}
 
-	if ss.ClusterStatus() != source.ClusterReady {
-		return fmt.Errorf("source not yet ready. current status is %s", ss.ClusterStatus())
+	if ss.ClusterStatus() != migration.ClusterReady {
+		return fmt.Errorf("migration not yet ready. current status is %s", ss.ClusterStatus())
 	}
 
 	return nil
 }
 
-func (h *virtualMachineHandler) triggerExport(vm *importjob.VirtualMachine) error {
+func (h *virtualMachineHandler) triggerExport(vm *migration.VirtualMachineImport) error {
 	vmo, err := h.generateVMO(vm)
 	if err != nil {
 		return fmt.Errorf("error generating VMO in trigger export: %v", err)
 	}
 
 	// power off machine
-	if !util.ConditionExists(vm.Status.ImportConditions, importjob.VirtualMachinePoweringOff, v1.ConditionTrue) {
+	if !util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweringOff, v1.ConditionTrue) {
 		err = vmo.PowerOffVirtualMachine(vm)
 		if err != nil {
 			return fmt.Errorf("error in poweroff call: %v", err)
 		}
 		conds := []common.Condition{
 			{
-				Type:               importjob.VirtualMachinePoweringOff,
+				Type:               migration.VirtualMachinePoweringOff,
 				Status:             v1.ConditionTrue,
 				LastUpdateTime:     metav1.Now().Format(time.RFC3339),
 				LastTransitionTime: metav1.Now().Format(time.RFC3339),
@@ -229,8 +243,8 @@ func (h *virtualMachineHandler) triggerExport(vm *importjob.VirtualMachine) erro
 		return nil
 	}
 
-	if !util.ConditionExists(vm.Status.ImportConditions, importjob.VirtualMachinePoweredOff, v1.ConditionTrue) &&
-		util.ConditionExists(vm.Status.ImportConditions, importjob.VirtualMachinePoweringOff, v1.ConditionTrue) {
+	if !util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweredOff, v1.ConditionTrue) &&
+		util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweringOff, v1.ConditionTrue) {
 		// check if VM is powered off
 		ok, err := vmo.IsPoweredOff(vm)
 		if err != nil {
@@ -239,7 +253,7 @@ func (h *virtualMachineHandler) triggerExport(vm *importjob.VirtualMachine) erro
 		if ok {
 			conds := []common.Condition{
 				{
-					Type:               importjob.VirtualMachinePoweredOff,
+					Type:               migration.VirtualMachinePoweredOff,
 					Status:             v1.ConditionTrue,
 					LastUpdateTime:     metav1.Now().Format(time.RFC3339),
 					LastTransitionTime: metav1.Now().Format(time.RFC3339),
@@ -253,16 +267,16 @@ func (h *virtualMachineHandler) triggerExport(vm *importjob.VirtualMachine) erro
 		return fmt.Errorf("waiting for vm %s to be powered off", fmt.Sprintf("%s/%s", vm.Namespace, vm.Name))
 	}
 
-	if util.ConditionExists(vm.Status.ImportConditions, importjob.VirtualMachinePoweredOff, v1.ConditionTrue) &&
-		util.ConditionExists(vm.Status.ImportConditions, importjob.VirtualMachinePoweringOff, v1.ConditionTrue) &&
-		!util.ConditionExists(vm.Status.ImportConditions, importjob.VirtualMachineExported, v1.ConditionTrue) {
+	if util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweredOff, v1.ConditionTrue) &&
+		util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweringOff, v1.ConditionTrue) &&
+		!util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineExported, v1.ConditionTrue) {
 		err := vmo.ExportVirtualMachine(vm)
 		if err != nil {
 			return fmt.Errorf("error exporting virtual machine: %v", err)
 		}
 		conds := []common.Condition{
 			{
-				Type:               importjob.VirtualMachineExported,
+				Type:               migration.VirtualMachineExported,
 				Status:             v1.ConditionTrue,
 				LastUpdateTime:     metav1.Now().Format(time.RFC3339),
 				LastTransitionTime: metav1.Now().Format(time.RFC3339),
@@ -276,11 +290,11 @@ func (h *virtualMachineHandler) triggerExport(vm *importjob.VirtualMachine) erro
 }
 
 // generateVMO is a wrapper to generate a VirtualMachineOperations client
-func (h *virtualMachineHandler) generateVMO(vm *importjob.VirtualMachine) (source.VirtualMachineOperations, error) {
+func (h *virtualMachineHandler) generateVMO(vm *migration.VirtualMachineImport) (VirtualMachineOperations, error) {
 
 	source, err := h.generateSource(vm)
 	if err != nil {
-		return nil, fmt.Errorf("error generating source interface: %v", err)
+		return nil, fmt.Errorf("error generating migration interface: %v", err)
 	}
 
 	secretRef := source.SecretReference()
@@ -290,12 +304,23 @@ func (h *virtualMachineHandler) generateVMO(vm *importjob.VirtualMachine) (sourc
 	}
 
 	// generate VirtualMachineOperations Interface.
-	// this will be used for source specific operations
-	return source.GenerateClient(h.ctx, secret)
+	// this will be used for migration specific operations
+
+	if source.GetKind() == strings.ToLower("vmwaresource") {
+		endpoint, dc := source.GetConnectionInfo()
+		return vmware.NewClient(h.ctx, endpoint, dc, secret)
+	}
+
+	if source.GetKind() == strings.ToLower("openstacksource") {
+		endpoint, region := source.GetConnectionInfo()
+		return openstack.NewClient(h.ctx, endpoint, region, secret)
+	}
+
+	return nil, fmt.Errorf("unsupport source kind")
 }
 
-func (h *virtualMachineHandler) generateSource(vm *importjob.VirtualMachine) (source.SourceInterface, error) {
-	var s source.SourceInterface
+func (h *virtualMachineHandler) generateSource(vm *migration.VirtualMachineImport) (migration.SourceInterface, error) {
+	var s migration.SourceInterface
 	var err error
 	if strings.ToLower(vm.Spec.SourceCluster.Kind) == "vmware" {
 		s, err = h.vmware.Get(vm.Spec.SourceCluster.Namespace, vm.Spec.SourceCluster.Name, metav1.GetOptions{})
@@ -313,11 +338,11 @@ func (h *virtualMachineHandler) generateSource(vm *importjob.VirtualMachine) (so
 	return s, nil
 }
 
-func (h *virtualMachineHandler) createVirtualMachineImages(vm *importjob.VirtualMachine) error {
+func (h *virtualMachineHandler) createVirtualMachineImages(vm *migration.VirtualMachineImport) error {
 	// check and create VirtualMachineImage objects
 	status := vm.Status.DeepCopy()
 	for i, d := range status.DiskImportStatus {
-		if !util.ConditionExists(d.DiskConditions, importjob.VirtualMachineImageSubmitted, v1.ConditionTrue) {
+		if !util.ConditionExists(d.DiskConditions, migration.VirtualMachineImageSubmitted, v1.ConditionTrue) {
 			vmi := &harvesterv1beta1.VirtualMachineImage{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: "image-",
@@ -345,7 +370,7 @@ func (h *virtualMachineHandler) createVirtualMachineImages(vm *importjob.Virtual
 			vm.Status.DiskImportStatus[i] = d
 			cond := []common.Condition{
 				{
-					Type:               importjob.VirtualMachineImageSubmitted,
+					Type:               migration.VirtualMachineImageSubmitted,
 					Status:             v1.ConditionTrue,
 					LastUpdateTime:     metav1.Now().Format(time.RFC3339),
 					LastTransitionTime: metav1.Now().Format(time.RFC3339),
@@ -358,9 +383,9 @@ func (h *virtualMachineHandler) createVirtualMachineImages(vm *importjob.Virtual
 	return nil
 }
 
-func (h *virtualMachineHandler) reconcileVMIStatus(vm *importjob.VirtualMachine) error {
+func (h *virtualMachineHandler) reconcileVMIStatus(vm *migration.VirtualMachineImport) error {
 	for i, d := range vm.Status.DiskImportStatus {
-		if !util.ConditionExists(d.DiskConditions, importjob.VirtualMachineImageReady, v1.ConditionTrue) {
+		if !util.ConditionExists(d.DiskConditions, migration.VirtualMachineImageReady, v1.ConditionTrue) {
 			vmi, err := h.vmi.Get(vm.Namespace, d.VirtualMachineImage, metav1.GetOptions{})
 			if err != nil {
 				return fmt.Errorf("error quering vmi in reconcileVMIStatus: %v", err)
@@ -369,7 +394,7 @@ func (h *virtualMachineHandler) reconcileVMIStatus(vm *importjob.VirtualMachine)
 				if v.Type == harvesterv1beta1.ImageImported && v.Status == v1.ConditionTrue {
 					cond := []common.Condition{
 						{
-							Type:               importjob.VirtualMachineImageReady,
+							Type:               migration.VirtualMachineImageReady,
 							Status:             v1.ConditionTrue,
 							LastUpdateTime:     metav1.Now().Format(time.RFC3339),
 							LastTransitionTime: metav1.Now().Format(time.RFC3339),
@@ -383,7 +408,7 @@ func (h *virtualMachineHandler) reconcileVMIStatus(vm *importjob.VirtualMachine)
 				if v.Type == harvesterv1beta1.ImageImported && v.Status == v1.ConditionFalse && v.Reason == "ImportFailed" {
 					cond := []common.Condition{
 						{
-							Type:               importjob.VirtualMachineImageFailed,
+							Type:               migration.VirtualMachineImageFailed,
 							Status:             v1.ConditionTrue,
 							LastUpdateTime:     metav1.Now().Format(time.RFC3339),
 							LastTransitionTime: metav1.Now().Format(time.RFC3339),
@@ -399,7 +424,7 @@ func (h *virtualMachineHandler) reconcileVMIStatus(vm *importjob.VirtualMachine)
 	return nil
 }
 
-func (h *virtualMachineHandler) createVirtualMachine(vm *importjob.VirtualMachine) error {
+func (h *virtualMachineHandler) createVirtualMachine(vm *migration.VirtualMachineImport) error {
 	vmo, err := h.generateVMO(vm)
 	if err != nil {
 		return fmt.Errorf("error generating VMO in createVirtualMachine :%v", err)
@@ -454,7 +479,7 @@ func (h *virtualMachineHandler) createVirtualMachine(vm *importjob.VirtualMachin
 	return nil
 }
 
-func (h *virtualMachineHandler) checkVirtualMachine(vm *importjob.VirtualMachine) (bool, error) {
+func (h *virtualMachineHandler) checkVirtualMachine(vm *migration.VirtualMachineImport) (bool, error) {
 	vmObj, err := h.kubevirt.Get(vm.Namespace, vm.Status.NewVirtualMachine, metav1.GetOptions{})
 	if err != nil {
 		return false, fmt.Errorf("error querying kubevirt vm in checkVirtualMachine :%v", err)
@@ -485,15 +510,15 @@ func (h *virtualMachineHandler) ReconcileVMI(_ string, _ string, obj runtime.Obj
 	return nil, nil
 }
 
-func (h *virtualMachineHandler) cleanupAndResubmit(vm *importjob.VirtualMachine) error {
+func (h *virtualMachineHandler) cleanupAndResubmit(vm *migration.VirtualMachineImport) error {
 	// need to wait for all VMI's to be complete or failed before we cleanup failed objects
 	for i, d := range vm.Status.DiskImportStatus {
-		if util.ConditionExists(d.DiskConditions, importjob.VirtualMachineImageFailed, v1.ConditionTrue) {
+		if util.ConditionExists(d.DiskConditions, migration.VirtualMachineImageFailed, v1.ConditionTrue) {
 			err := h.vmi.Delete(vm.Namespace, d.VirtualMachineImage, &metav1.DeleteOptions{})
 			if err != nil {
 				return fmt.Errorf("error deleting failed virtualmachineimage: %v", err)
 			}
-			conds := util.RemoveCondition(d.DiskConditions, importjob.VirtualMachineImageFailed, v1.ConditionTrue)
+			conds := util.RemoveCondition(d.DiskConditions, migration.VirtualMachineImageFailed, v1.ConditionTrue)
 			d.DiskConditions = conds
 			vm.Status.DiskImportStatus[i] = d
 		}
@@ -502,7 +527,7 @@ func (h *virtualMachineHandler) cleanupAndResubmit(vm *importjob.VirtualMachine)
 	return nil
 }
 
-func (h *virtualMachineHandler) findAndCreatePVC(vm *importjob.VirtualMachine) error {
+func (h *virtualMachineHandler) findAndCreatePVC(vm *migration.VirtualMachineImport) error {
 	for _, v := range vm.Status.DiskImportStatus {
 		vmiObj, err := h.vmi.Get(vm.Namespace, v.VirtualMachineImage, metav1.GetOptions{})
 		if err != nil {
@@ -551,7 +576,7 @@ func (h *virtualMachineHandler) findAndCreatePVC(vm *importjob.VirtualMachine) e
 	return nil
 }
 
-func (h *virtualMachineHandler) tidyUpObjects(vm *importjob.VirtualMachine) error {
+func (h *virtualMachineHandler) tidyUpObjects(vm *migration.VirtualMachineImport) error {
 	for _, v := range vm.Status.DiskImportStatus {
 		vmiObj, err := h.vmi.Get(vm.Namespace, v.VirtualMachineImage, metav1.GetOptions{})
 		if err != nil {

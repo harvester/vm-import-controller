@@ -16,15 +16,9 @@ func main() {
 		OutputPackage: "github.com/harvester/vm-import-controller/pkg/generated",
 		Boilerplate:   "scripts/boilerplate.go.txt",
 		Groups: map[string]args.Group{
-			"source.harvesterhci.io": {
+			"migration.harvesterhci.io": {
 				Types: []interface{}{
-					"./pkg/apis/source.harvesterhci.io/v1beta1",
-				},
-				GenerateTypes: true,
-			},
-			"importjob.harvesterhci.io": {
-				Types: []interface{}{
-					"./pkg/apis/importjob.harvesterhci.io/v1beta1",
+					"./pkg/apis/migration.harvesterhci.io/v1beta1",
 				},
 				GenerateTypes: true,
 			},

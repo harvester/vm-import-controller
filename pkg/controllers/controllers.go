@@ -6,11 +6,9 @@ import (
 
 	harvester "github.com/harvester/harvester/pkg/generated/controllers/harvesterhci.io"
 	"github.com/harvester/harvester/pkg/generated/controllers/kubevirt.io"
-	ic "github.com/harvester/vm-import-controller/pkg/controllers/importjob"
-	sc "github.com/harvester/vm-import-controller/pkg/controllers/source"
+	sc "github.com/harvester/vm-import-controller/pkg/controllers/migration"
 	"github.com/harvester/vm-import-controller/pkg/crd"
-	"github.com/harvester/vm-import-controller/pkg/generated/controllers/importjob.harvesterhci.io"
-	"github.com/harvester/vm-import-controller/pkg/generated/controllers/source.harvesterhci.io"
+	"github.com/harvester/vm-import-controller/pkg/generated/controllers/migration.harvesterhci.io"
 	"github.com/rancher/lasso/pkg/cache"
 	"github.com/rancher/lasso/pkg/client"
 	"github.com/rancher/lasso/pkg/controller"
@@ -51,7 +49,7 @@ func Register(ctx context.Context, restConfig *rest.Config) error {
 		return err
 	}
 
-	sourceFactory, err := source.NewFactoryFromConfigWithOptions(restConfig, &source.FactoryOptions{
+	migrationFactory, err := migration.NewFactoryFromConfigWithOptions(restConfig, &migration.FactoryOptions{
 		SharedControllerFactory: scf,
 	})
 
@@ -70,20 +68,16 @@ func Register(ctx context.Context, restConfig *rest.Config) error {
 		SharedControllerFactory: scf,
 	})
 
-	importJobFactory, err := importjob.NewFactoryFromConfigWithOptions(restConfig, &importjob.FactoryOptions{
-		SharedControllerFactory: scf,
-	})
-
 	kubevirtFactory, err := kubevirt.NewFactoryFromConfigWithOptions(restConfig, &kubevirt.FactoryOptions{
 		SharedControllerFactory: scf,
 	})
-	sc.RegisterVmareController(ctx, sourceFactory.Source().V1beta1().Vmware(), coreFactory.Core().V1().Secret())
-	sc.RegisterOpenstackController(ctx, sourceFactory.Source().V1beta1().Openstack(), coreFactory.Core().V1().Secret())
+	sc.RegisterVmareController(ctx, migrationFactory.Migration().V1beta1().VmwareSource(), coreFactory.Core().V1().Secret())
+	sc.RegisterOpenstackController(ctx, migrationFactory.Migration().V1beta1().OpenstackSource(), coreFactory.Core().V1().Secret())
 
-	ic.RegisterVMImportController(ctx, sourceFactory.Source().V1beta1().Vmware(), sourceFactory.Source().V1beta1().Openstack(),
-		coreFactory.Core().V1().Secret(), importJobFactory.Importjob().V1beta1().VirtualMachine(),
+	sc.RegisterVMImportController(ctx, migrationFactory.Migration().V1beta1().VmwareSource(), migrationFactory.Migration().V1beta1().OpenstackSource(),
+		coreFactory.Core().V1().Secret(), migrationFactory.Migration().V1beta1().VirtualMachineImport(),
 		harvesterFactory.Harvesterhci().V1beta1().VirtualMachineImage(), kubevirtFactory.Kubevirt().V1().VirtualMachine(),
 		coreFactory.Core().V1().PersistentVolumeClaim())
 
-	return start.All(ctx, 1, sourceFactory)
+	return start.All(ctx, 1, migrationFactory)
 }
