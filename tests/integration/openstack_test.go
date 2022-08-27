@@ -2,6 +2,8 @@ package integration
 
 import (
 	"fmt"
+	"strings"
+
 	harvesterv1beta1 "github.com/harvester/harvester/pkg/apis/harvesterhci.io/v1beta1"
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/util"
@@ -11,7 +13,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	kubevirt "kubevirt.io/api/core/v1"
-	"strings"
 )
 
 var _ = Describe("test openstack export/import integration", func() {
@@ -28,7 +29,7 @@ var _ = Describe("test openstack export/import integration", func() {
 			Skip("skipping openstack integration tests as not using an existing environment")
 		}
 
-		By("checking if openstack migration is ready", func() {
+		By("checking if openstack source is ready", func() {
 			Eventually(func() error {
 				o := &migration.OpenstackSource{}
 				err := k8sClient.Get(ctx, setup.OpenstackSourceNamespacedName, o)
