@@ -1,0 +1,8 @@
+/build
+/.dapper
+/.cache
+/bin
+/dist
+*.swp
+.idea
+*.DS_Store
