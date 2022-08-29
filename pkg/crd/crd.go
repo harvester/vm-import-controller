@@ -3,8 +3,7 @@ package crd
 import (
 	"context"
 
-	importjob "github.com/harvester/vm-import-controller/pkg/apis/importjob.harvesterhci.io/v1beta1"
-	source "github.com/harvester/vm-import-controller/pkg/apis/source.harvesterhci.io/v1beta1"
+	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/rancher/wrangler/pkg/crd"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
@@ -12,15 +11,15 @@ import (
 
 func List() []crd.CRD {
 	return []crd.CRD{
-		newCRD("source.harvesterhci.io", &source.Vmware{}, func(c crd.CRD) crd.CRD {
+		newCRD("migration.harvesterhci.io", &migration.VmwareSource{}, func(c crd.CRD) crd.CRD {
 			return c.
 				WithColumn("Status", ".status.status")
 		}),
-		newCRD("source.harvesterhci.io", &source.Openstack{}, func(c crd.CRD) crd.CRD {
+		newCRD("migration.harvesterhci.io", &migration.OpenstackSource{}, func(c crd.CRD) crd.CRD {
 			return c.
 				WithColumn("Status", ".status.status")
 		}),
-		newCRD("importjob.harvesterhci.io", &importjob.VirtualMachine{}, func(c crd.CRD) crd.CRD {
+		newCRD("migration.harvesterhci.io", &migration.VirtualMachineImport{}, func(c crd.CRD) crd.CRD {
 			return c.
 				WithColumn("Status", ".status.importStatus")
 		}),

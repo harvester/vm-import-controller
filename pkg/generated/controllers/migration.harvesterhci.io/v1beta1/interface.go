@@ -19,7 +19,7 @@ limitations under the License.
 package v1beta1
 
 import (
-	v1beta1 "github.com/harvester/vm-import-controller/pkg/apis/source.harvesterhci.io/v1beta1"
+	v1beta1 "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/rancher/lasso/pkg/controller"
 	"github.com/rancher/wrangler/pkg/schemes"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -30,8 +30,9 @@ func init() {
 }
 
 type Interface interface {
-	Openstack() OpenstackController
-	Vmware() VmwareController
+	OpenstackSource() OpenstackSourceController
+	VirtualMachineImport() VirtualMachineImportController
+	VmwareSource() VmwareSourceController
 }
 
 func New(controllerFactory controller.SharedControllerFactory) Interface {
@@ -44,9 +45,12 @@ type version struct {
 	controllerFactory controller.SharedControllerFactory
 }
 
-func (c *version) Openstack() OpenstackController {
-	return NewOpenstackController(schema.GroupVersionKind{Group: "source.harvesterhci.io", Version: "v1beta1", Kind: "Openstack"}, "openstacks", true, c.controllerFactory)
+func (c *version) OpenstackSource() OpenstackSourceController {
+	return NewOpenstackSourceController(schema.GroupVersionKind{Group: "migration.harvesterhci.io", Version: "v1beta1", Kind: "OpenstackSource"}, "openstacksources", true, c.controllerFactory)
 }
-func (c *version) Vmware() VmwareController {
-	return NewVmwareController(schema.GroupVersionKind{Group: "source.harvesterhci.io", Version: "v1beta1", Kind: "Vmware"}, "vmwares", true, c.controllerFactory)
+func (c *version) VirtualMachineImport() VirtualMachineImportController {
+	return NewVirtualMachineImportController(schema.GroupVersionKind{Group: "migration.harvesterhci.io", Version: "v1beta1", Kind: "VirtualMachineImport"}, "virtualmachineimports", true, c.controllerFactory)
+}
+func (c *version) VmwareSource() VmwareSourceController {
+	return NewVmwareSourceController(schema.GroupVersionKind{Group: "migration.harvesterhci.io", Version: "v1beta1", Kind: "VmwareSource"}, "vmwaresources", true, c.controllerFactory)
 }

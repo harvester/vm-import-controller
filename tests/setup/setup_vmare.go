@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	importjob "github.com/harvester/vm-import-controller/pkg/apis/importjob.harvesterhci.io/v1beta1"
-	source "github.com/harvester/vm-import-controller/pkg/apis/source.harvesterhci.io/v1beta1"
+	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -18,8 +17,8 @@ const (
 	sourceCluster     = "vmware-integration"
 	virtualmachine    = "vm-export-test"
 	defaultNamespace  = "default"
-	defaultKind       = "vmware"
-	defaultAPIVersion = "source.harvesterhci.io/v1beta1"
+	defaultKind       = "VmwareSource"
+	defaultAPIVersion = "migration.harvesterhci.io/v1beta1"
 )
 
 var (
@@ -28,12 +27,12 @@ var (
 
 type applyObject func(context.Context, client.Client) error
 
-// SetupVMware will try and setup a vmware source based on GOVC environment variables
-// It will check the following environment variables to build source and importjob CRD's
+// SetupVMware will try and setup a vmware migration based on GOVC environment variables
+// It will check the following environment variables to build migration and importjob CRD's
 // GOVC_URL: Identify vsphere endpoint
 // GOVC_DATACENTER: Identify vsphere datacenter
-// GOVC_USERNAME: Username for source secret
-// GOVC_PASSWORD: Password for source secret
+// GOVC_USERNAME: Username for migration secret
+// GOVC_PASSWORD: Password for migration secret
 // SVC_ADDRESS: local machine address, used to generate the URL that Harvester downloads the exported images from
 // VM_NAME: name of VM to be exported
 // VM_FOLDER: folder where VM pointed to by VM_NAME is located
@@ -98,12 +97,12 @@ func setupVmwareSource(ctx context.Context, k8sClient client.Client) error {
 		return fmt.Errorf("env variable GOVC_DATACENTER not set")
 	}
 
-	s := &source.Vmware{
+	s := &migration.VmwareSource{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      sourceCluster,
 			Namespace: defaultNamespace,
 		},
-		Spec: source.VmwareClusterSpec{
+		Spec: migration.VmwareSourceSpec{
 			EndpointAddress: endpoint,
 			Datacenter:      dc,
 			Credentials: corev1.SecretReference{
@@ -130,12 +129,12 @@ func setupVmwareVMExport(ctx context.Context, k8sClient client.Client) error {
 
 	folder, _ := os.LookupEnv("VM_FOLDER")
 
-	j := &importjob.VirtualMachine{
+	j := &migration.VirtualMachineImport{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      virtualmachine,
 			Namespace: defaultNamespace,
 		},
-		Spec: importjob.VirtualMachineImportSpec{
+		Spec: migration.VirtualMachineImportSpec{
 			SourceCluster: corev1.ObjectReference{
 				Name:       sourceCluster,
 				Namespace:  defaultNamespace,
@@ -162,7 +161,7 @@ func CleanupVmware(ctx context.Context, k8sClient client.Client) error {
 		return err
 	}
 
-	vmware := &source.Vmware{
+	vmware := &migration.VmwareSource{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      sourceCluster,
 			Namespace: defaultNamespace,
@@ -174,7 +173,7 @@ func CleanupVmware(ctx context.Context, k8sClient client.Client) error {
 		return err
 	}
 
-	i := &importjob.VirtualMachine{
+	i := &migration.VirtualMachineImport{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      virtualmachine,
 			Namespace: defaultNamespace,

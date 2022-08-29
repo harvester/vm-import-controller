@@ -4,8 +4,7 @@ metadata:
   name:  {{ include "vm-import-controller.fullname" . }}-role
 rules:
 - apiGroups:
-  - source.harvesterhci.io
-  - importjob.harvesterhci.io
+  - migration.harvesterhci.io
   resources:
   - "*"
   verbs:

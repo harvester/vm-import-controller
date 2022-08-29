@@ -1,4 +1,4 @@
-package source
+package migration
 
 import (
 	"context"
@@ -8,8 +8,8 @@ import (
 	"github.com/harvester/vm-import-controller/pkg/apis/common"
 	"github.com/sirupsen/logrus"
 
-	source "github.com/harvester/vm-import-controller/pkg/apis/source.harvesterhci.io/v1beta1"
-	sourceController "github.com/harvester/vm-import-controller/pkg/generated/controllers/source.harvesterhci.io/v1beta1"
+	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
+	migrationController "github.com/harvester/vm-import-controller/pkg/generated/controllers/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/source/vmware"
 	"github.com/harvester/vm-import-controller/pkg/util"
 	corecontrollers "github.com/rancher/wrangler/pkg/generated/controllers/core/v1"
@@ -19,34 +19,34 @@ import (
 
 type vmwareHandler struct {
 	ctx    context.Context
-	vmware sourceController.VmwareController
+	vmware migrationController.VmwareSourceController
 	secret corecontrollers.SecretController
 }
 
-func RegisterVmareController(ctx context.Context, vc sourceController.VmwareController, secret corecontrollers.SecretController) {
+func RegisterVmareController(ctx context.Context, vc migrationController.VmwareSourceController, secret corecontrollers.SecretController) {
 	vHandler := &vmwareHandler{
 		ctx:    ctx,
 		vmware: vc,
 		secret: secret,
 	}
 
-	vc.OnChange(ctx, "vmware-source-change", vHandler.OnSourceChange)
+	vc.OnChange(ctx, "vmware-migration-change", vHandler.OnSourceChange)
 }
 
-func (h *vmwareHandler) OnSourceChange(key string, v *source.Vmware) (*source.Vmware, error) {
+func (h *vmwareHandler) OnSourceChange(key string, v *migration.VmwareSource) (*migration.VmwareSource, error) {
 	if v == nil || v.DeletionTimestamp != nil {
 		return v, nil
 	}
 
-	logrus.Infof("reoncilling vmware source %s", key)
-	if v.Status.Status != source.ClusterReady {
+	logrus.Infof("reoncilling vmware migration %s", key)
+	if v.Status.Status != migration.ClusterReady {
 		secretObj, err := h.secret.Get(v.Spec.Credentials.Namespace, v.Spec.Credentials.Name, metav1.GetOptions{})
 		if err != nil {
-			return v, fmt.Errorf("error looking up secret for vmware source: %v", err)
+			return v, fmt.Errorf("error looking up secret for vmware migration: %v", err)
 		}
 		client, err := vmware.NewClient(h.ctx, v.Spec.EndpointAddress, v.Spec.Datacenter, secretObj)
 		if err != nil {
-			return v, fmt.Errorf("error generating vmware client for vmware source: %s: %v", v.Name, err)
+			return v, fmt.Errorf("error generating vmware client for vmware migration: %s: %v", v.Name, err)
 		}
 
 		err = client.Verify()
@@ -54,12 +54,12 @@ func (h *vmwareHandler) OnSourceChange(key string, v *source.Vmware) (*source.Vm
 			// unable to find specific datacenter
 			conds := []common.Condition{
 				{
-					Type:               source.ClusterErrorCondition,
+					Type:               migration.ClusterErrorCondition,
 					Status:             v1.ConditionTrue,
 					LastUpdateTime:     metav1.Now().Format(time.RFC3339),
 					LastTransitionTime: metav1.Now().Format(time.RFC3339),
 				}, {
-					Type:               source.ClusterReadyCondition,
+					Type:               migration.ClusterReadyCondition,
 					Status:             v1.ConditionFalse,
 					LastUpdateTime:     metav1.Now().Format(time.RFC3339),
 					LastTransitionTime: metav1.Now().Format(time.RFC3339),
@@ -67,18 +67,18 @@ func (h *vmwareHandler) OnSourceChange(key string, v *source.Vmware) (*source.Vm
 			}
 
 			v.Status.Conditions = util.MergeConditions(v.Status.Conditions, conds)
-			v.Status.Status = source.ClusterNotReady
+			v.Status.Status = migration.ClusterNotReady
 			return h.vmware.UpdateStatus(v)
 		}
 
 		conds := []common.Condition{
 			{
-				Type:               source.ClusterReadyCondition,
+				Type:               migration.ClusterReadyCondition,
 				Status:             v1.ConditionTrue,
 				LastUpdateTime:     metav1.Now().Format(time.RFC3339),
 				LastTransitionTime: metav1.Now().Format(time.RFC3339),
 			}, {
-				Type:               source.ClusterErrorCondition,
+				Type:               migration.ClusterErrorCondition,
 				Status:             v1.ConditionFalse,
 				LastUpdateTime:     metav1.Now().Format(time.RFC3339),
 				LastTransitionTime: metav1.Now().Format(time.RFC3339),
@@ -86,7 +86,7 @@ func (h *vmwareHandler) OnSourceChange(key string, v *source.Vmware) (*source.Vm
 		}
 
 		v.Status.Conditions = util.MergeConditions(v.Status.Conditions, conds)
-		v.Status.Status = source.ClusterReady
+		v.Status.Status = migration.ClusterReady
 		return h.vmware.UpdateStatus(v)
 	}
 	return v, nil

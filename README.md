@@ -15,8 +15,8 @@ sources allows users to define valid source clusters.
 For example:
 
 ```yaml
-apiVersion: source.harvesterhci.io/v1beta1
-kind: Vmware
+apiVersion: migration.harvesterhci.io/v1beta1
+kind: VmwareSource
 metadata:
   name: vcsim
   namespace: default
@@ -46,7 +46,7 @@ As part of the reconcile process, the controller will login to the vcenter and v
 Once this check is passed, the source is marked ready, and can be used for vm migrations
 
 ```shell
-$ kubectl get vmware.source 
+$ kubectl get vmwaresource.migration 
 NAME      STATUS
 vcsim   clusterReady
 ```
@@ -54,8 +54,8 @@ vcsim   clusterReady
 For openstack based source clusters a sample definition is as follows:
 
 ```yaml
-apiVersion: source.harvesterhci.io/v1beta1
-kind: Openstack
+apiVersion: migration.harvesterhci.io/v1beta1
+kind: OpenstackSource
 metadata:
   name: devstack
   namespace: default
@@ -86,19 +86,19 @@ stringData:
 Openstack source reconcile process, attempts to list VM's in the project, and marks the source as ready
 
 ```shell
-$ kubectl get openstack.source
+$ kubectl get openstacksource.migration
 NAME       STATUS
 devstack   clusterReady
 ```
 
-### ImportJob
-The ImportJob crd provides a way for users to define the source VM and mapping to the actual source cluster to perform the VM export-import from.
+### VirtualMachimeImport
+The VirtualMachineImport crd provides a way for users to define the source VM and mapping to the actual source cluster to perform the VM export-import from.
 
-A sample import job looks as follows:
+A sample VirtualMachineImport looks as follows:
 
 ```yaml
-apiVersion: importjob.harvesterhci.io/v1beta1
-kind: VirtualMachine
+apiVersion: migration.harvesterhci.io/v1beta1
+kind: VirtualMachineImport
 metadata:
   name: alpine-export-test
   namespace: default
@@ -112,8 +112,8 @@ spec:
   sourceCluster: 
     name: vcsim
     namespace: default
-    kind: Vmware
-    apiVersion: source.harvesterhci.io/v1beta1
+    kind: VmwareSource
+    apiVersion: migration.harvesterhci.io/v1beta1
 ```
 
 This will trigger the controller to export the VM named "alpine-export-test" on the vmware source vcsim to be exported, processed and recreated into the harvester cluster
@@ -127,18 +127,18 @@ If a match is not found, then each unmatched network inteface is attached to the
 Once the virtual machine has been imported successfully the object will reflect the status
 
 ```shell
-$ kubectl get virtualmachine.importjob
+$ kubectl get virtualmachineimport.migration
 NAME                    STATUS
 alpine-export-test      virtualMachineRunning
 openstack-cirros-test   virtualMachineRunning
 
 ```
 
-Similarly, users can define a VirtualMachine importjob for Openstack source as well:
+Similarly, users can define a VirtualMachineImport for Openstack source as well:
 
 ```yaml
-apiVersion: importjob.harvesterhci.io/v1beta1
-kind: VirtualMachine
+apiVersion: migration.harvesterhci.io/v1beta1
+kind: VirtualMachineImport
 metadata:
   name: openstack-demo
   namespace: default
@@ -152,8 +152,8 @@ spec:
   sourceCluster: 
     name: devstack
     namespace: default
-    kind: Openstack
-    apiVersion: source.harvesterhci.io/v1beta1
+    kind: OpenstackSource
+    apiVersion: migration.harvesterhci.io/v1beta1
 ```
 
 *NOTE:* Openstack allows users to have multiple instances with the same name. In such a scenario the users are advised to use the Instance ID. The reconcile logic tries to perform a lookup from name to ID when a name is used.

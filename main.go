@@ -4,7 +4,7 @@ import (
 	"log"
 
 	harvesterv1beta1 "github.com/harvester/harvester/pkg/apis/harvesterhci.io/v1beta1"
-	source "github.com/harvester/vm-import-controller/pkg/apis/source.harvesterhci.io/v1beta1"
+	source "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/controllers"
 	"github.com/harvester/vm-import-controller/pkg/server"
 	"github.com/rancher/wrangler/pkg/signals"

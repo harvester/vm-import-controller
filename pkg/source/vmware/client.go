@@ -3,6 +3,7 @@ package vmware
 import (
 	"context"
 	"fmt"
+	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"io/ioutil"
 	"net/url"
 	"os"
@@ -11,7 +12,6 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	importjob "github.com/harvester/vm-import-controller/pkg/apis/importjob.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/qemu"
 	"github.com/harvester/vm-import-controller/pkg/server"
 	"github.com/sirupsen/logrus"
@@ -102,8 +102,8 @@ func (c *Client) Close() error {
 	return os.Remove(c.tmpCerts)
 }
 
-// Verify checks is a verfication check for source provider to ensure that the config is valid
-// it is used to set the condition Ready on the source provider.
+// Verify checks is a verfication check for migration provider to ensure that the config is valid
+// it is used to set the condition Ready on the migration provider.
 // for vmware client we verify if the DC exists
 func (c *Client) Verify() error {
 	f := find.NewFinder(c.Client.Client, true)
@@ -121,7 +121,7 @@ func (c *Client) Verify() error {
 	return nil
 }
 
-func (c *Client) ExportVirtualMachine(vm *importjob.VirtualMachine) error {
+func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error {
 
 	tmpPath, err := ioutil.TempDir("/tmp", fmt.Sprintf("%s-%s-", vm.Name, vm.Namespace))
 
@@ -159,7 +159,7 @@ func (c *Client) ExportVirtualMachine(vm *importjob.VirtualMachine) error {
 			if err != nil {
 				return err
 			}
-			vm.Status.DiskImportStatus = append(vm.Status.DiskImportStatus, importjob.DiskInfo{
+			vm.Status.DiskImportStatus = append(vm.Status.DiskImportStatus, migration.DiskInfo{
 				Name:     i.Path,
 				DiskSize: i.Size,
 			})
@@ -192,7 +192,7 @@ func (c *Client) ExportVirtualMachine(vm *importjob.VirtualMachine) error {
 	return os.RemoveAll(tmpPath)
 }
 
-func (c *Client) PowerOffVirtualMachine(vm *importjob.VirtualMachine) error {
+func (c *Client) PowerOffVirtualMachine(vm *migration.VirtualMachineImport) error {
 	vmObj, err := c.findVM(vm.Spec.Folder, vm.Spec.VirtualMachineName)
 	if err != nil {
 		return fmt.Errorf("error finding vm in PowerOffVirtualMachine: %v", err)
@@ -202,7 +202,7 @@ func (c *Client) PowerOffVirtualMachine(vm *importjob.VirtualMachine) error {
 	return err
 }
 
-func (c *Client) IsPoweredOff(vm *importjob.VirtualMachine) (bool, error) {
+func (c *Client) IsPoweredOff(vm *migration.VirtualMachineImport) (bool, error) {
 	vmObj, err := c.findVM(vm.Spec.Folder, vm.Spec.VirtualMachineName)
 	if err != nil {
 		return false, fmt.Errorf("error find VM in IsPoweredOff :%v", err)
@@ -220,7 +220,7 @@ func (c *Client) IsPoweredOff(vm *importjob.VirtualMachine) (bool, error) {
 	return false, nil
 }
 
-func (c *Client) GenerateVirtualMachine(vm *importjob.VirtualMachine) (*kubevirt.VirtualMachine, error) {
+func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*kubevirt.VirtualMachine, error) {
 	vmObj, err := c.findVM(vm.Spec.Folder, vm.Spec.VirtualMachineName)
 	if err != nil {
 		return nil, fmt.Errorf("error quering vm in GenerateVirtualMachine: %v", err)
@@ -316,7 +316,7 @@ func (c *Client) GenerateVirtualMachine(vm *importjob.VirtualMachine) (*kubevirt
 	vmSpec.Template.Spec.Networks = networkConfig
 	vmSpec.Template.Spec.Domain.Devices.Interfaces = interfaces
 	newVM.Spec = vmSpec
-	// disk attachment needs query by core controller for storage classes, so will be added by the importjob controller
+	// disk attachment needs query by core controller for storage classes, so will be added by the migration controller
 	return newVM, nil
 }
 
@@ -376,7 +376,7 @@ func identifyNetworkCards(devices []types.BaseVirtualDevice) []networkInfo {
 	return resp
 }
 
-func mapNetworkCards(networkCards []networkInfo, mapping []importjob.NetworkMapping) []networkInfo {
+func mapNetworkCards(networkCards []networkInfo, mapping []migration.NetworkMapping) []networkInfo {
 	var retNetwork []networkInfo
 	for _, nc := range networkCards {
 		for _, m := range mapping {

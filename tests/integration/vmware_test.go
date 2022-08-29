@@ -5,8 +5,7 @@ import (
 	"strings"
 
 	harvesterv1beta1 "github.com/harvester/harvester/pkg/apis/harvesterhci.io/v1beta1"
-	importjob "github.com/harvester/vm-import-controller/pkg/apis/importjob.harvesterhci.io/v1beta1"
-	source "github.com/harvester/vm-import-controller/pkg/apis/source.harvesterhci.io/v1beta1"
+	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/util"
 	"github.com/harvester/vm-import-controller/tests/setup"
 	. "github.com/onsi/ginkgo/v2"
@@ -31,15 +30,15 @@ var _ = Describe("test vmware export/import integration", func() {
 			Skip("skipping vmware integration tests as not using an existing environment")
 		}
 
-		By("checking if vmware source is ready", func() {
+		By("checking if vmware migration is ready", func() {
 			Eventually(func() error {
-				v := &source.Vmware{}
+				v := &migration.VmwareSource{}
 				err := k8sClient.Get(ctx, setup.VmwareSourceNamespacedName, v)
 				if err != nil {
 					return err
 				}
-				if v.Status.Status != source.ClusterReady {
-					return fmt.Errorf("waiting for cluster source to be ready. current condition is %s", v.Status.Status)
+				if v.Status.Status != migration.ClusterReady {
+					return fmt.Errorf("waiting for cluster migration to be ready. current condition is %s", v.Status.Status)
 				}
 
 				return nil
@@ -48,20 +47,20 @@ var _ = Describe("test vmware export/import integration", func() {
 
 		By("vm importjob has the correct conditions", func() {
 			Eventually(func() error {
-				v := &importjob.VirtualMachine{}
+				v := &migration.VirtualMachineImport{}
 				err := k8sClient.Get(ctx, setup.VmwareVMNamespacedName, v)
 				if err != nil {
 					return err
 				}
-				if !util.ConditionExists(v.Status.ImportConditions, importjob.VirtualMachinePoweringOff, v1.ConditionTrue) {
+				if !util.ConditionExists(v.Status.ImportConditions, migration.VirtualMachinePoweringOff, v1.ConditionTrue) {
 					return fmt.Errorf("expected virtualmachinepoweringoff condition to be present")
 				}
 
-				if !util.ConditionExists(v.Status.ImportConditions, importjob.VirtualMachinePoweredOff, v1.ConditionTrue) {
+				if !util.ConditionExists(v.Status.ImportConditions, migration.VirtualMachinePoweredOff, v1.ConditionTrue) {
 					return fmt.Errorf("expected virtualmachinepoweredoff condition to be present")
 				}
 
-				if !util.ConditionExists(v.Status.ImportConditions, importjob.VirtualMachineExported, v1.ConditionTrue) {
+				if !util.ConditionExists(v.Status.ImportConditions, migration.VirtualMachineExported, v1.ConditionTrue) {
 					return fmt.Errorf("expected virtualmachineexported condition to be present")
 				}
 
@@ -71,7 +70,7 @@ var _ = Describe("test vmware export/import integration", func() {
 
 		By("checking status of virtualmachineimage objects", func() {
 			Eventually(func() error {
-				v := &importjob.VirtualMachine{}
+				v := &migration.VirtualMachineImport{}
 				err := k8sClient.Get(ctx, setup.VmwareVMNamespacedName, v)
 				if err != nil {
 					return err
@@ -96,12 +95,12 @@ var _ = Describe("test vmware export/import integration", func() {
 					}
 				}
 				return nil
-			}, "1800s", "60s").ShouldNot(HaveOccurred())
+			}, "300s", "10s").ShouldNot(HaveOccurred())
 		})
 
 		By("checking that PVC claim has been created", func() {
 			Eventually(func() error {
-				v := &importjob.VirtualMachine{}
+				v := &migration.VirtualMachineImport{}
 				err := k8sClient.Get(ctx, setup.VmwareVMNamespacedName, v)
 				if err != nil {
 					return err
@@ -127,12 +126,12 @@ var _ = Describe("test vmware export/import integration", func() {
 				}
 
 				return nil
-			}, "30s", "5s").ShouldNot(HaveOccurred())
+			}, "120s", "10s").ShouldNot(HaveOccurred())
 		})
 
 		By("checking that the virtualmachine has been created", func() {
 			Eventually(func() error {
-				v := &importjob.VirtualMachine{}
+				v := &migration.VirtualMachineImport{}
 				err := k8sClient.Get(ctx, setup.VmwareVMNamespacedName, v)
 				if err != nil {
 					return err
@@ -150,7 +149,7 @@ var _ = Describe("test vmware export/import integration", func() {
 
 		By("checking that the virtualmachineimage ownership has been removed", func() {
 			Eventually(func() error {
-				v := &importjob.VirtualMachine{}
+				v := &migration.VirtualMachineImport{}
 				err := k8sClient.Get(ctx, setup.VmwareVMNamespacedName, v)
 				if err != nil {
 					return err

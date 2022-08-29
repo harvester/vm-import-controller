@@ -8,6 +8,7 @@ import (
 	"github.com/gophercloud/gophercloud/openstack/blockstorage/extensions/volumeactions"
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/flavors"
 	"github.com/gophercloud/gophercloud/openstack/imageservice/v2/images"
+	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/qemu"
 	"github.com/harvester/vm-import-controller/pkg/server"
 	"io/ioutil"
@@ -25,7 +26,6 @@ import (
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/extensions/startstop"
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/servers"
 	"github.com/gophercloud/gophercloud/openstack/imageservice/v2/imagedata"
-	importjob "github.com/harvester/vm-import-controller/pkg/apis/importjob.harvesterhci.io/v1beta1"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -159,7 +159,7 @@ func (c *Client) Verify() error {
 	return nil
 }
 
-func (c *Client) ExportVirtualMachine(vm *importjob.VirtualMachine) error {
+func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error {
 	vmObj, err := c.findVM(vm.Spec.VirtualMachineName)
 	if err != nil {
 		return err
@@ -280,7 +280,7 @@ func (c *Client) ExportVirtualMachine(vm *importjob.VirtualMachine) error {
 			return fmt.Errorf("error deleting image %s: %v", volImage.ImageID, err)
 		}
 
-		vm.Status.DiskImportStatus = append(vm.Status.DiskImportStatus, importjob.DiskInfo{
+		vm.Status.DiskImportStatus = append(vm.Status.DiskImportStatus, migration.DiskInfo{
 			Name:          fmt.Sprintf("%s-%d.img", vmObj.Name, i),
 			DiskSize:      int64(volObj.Size),
 			DiskLocalPath: server.TempDir(),
@@ -289,7 +289,7 @@ func (c *Client) ExportVirtualMachine(vm *importjob.VirtualMachine) error {
 	return os.RemoveAll(tmpDir)
 }
 
-func (c *Client) PowerOffVirtualMachine(vm *importjob.VirtualMachine) error {
+func (c *Client) PowerOffVirtualMachine(vm *migration.VirtualMachineImport) error {
 	computeClient, err := openstack.NewComputeV2(c.pClient, c.opts)
 	if err != nil {
 		return fmt.Errorf("error generating compute client during poweroffvirtualmachine: %v", err)
@@ -309,7 +309,7 @@ func (c *Client) PowerOffVirtualMachine(vm *importjob.VirtualMachine) error {
 	return nil
 }
 
-func (c *Client) IsPoweredOff(vm *importjob.VirtualMachine) (bool, error) {
+func (c *Client) IsPoweredOff(vm *migration.VirtualMachineImport) (bool, error) {
 
 	s, err := c.findVM(vm.Spec.VirtualMachineName)
 	if err != nil {
@@ -323,7 +323,7 @@ func (c *Client) IsPoweredOff(vm *importjob.VirtualMachine) (bool, error) {
 	return false, nil
 }
 
-func (c *Client) GenerateVirtualMachine(vm *importjob.VirtualMachine) (*kubevirt.VirtualMachine, error) {
+func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*kubevirt.VirtualMachine, error) {
 	vmObj, err := c.findVM(vm.Spec.VirtualMachineName)
 	if err != nil {
 		return nil, fmt.Errorf("error finding vm in generatevirtualmachine: %v", err)
@@ -431,7 +431,7 @@ func (c *Client) GenerateVirtualMachine(vm *importjob.VirtualMachine) (*kubevirt
 	vmSpec.Template.Spec.Networks = networkConfig
 	vmSpec.Template.Spec.Domain.Devices.Interfaces = interfaces
 	newVM.Spec = vmSpec
-	// disk attachment needs query by core controller for storage classes, so will be added by the importjob controller
+	// disk attachment needs query by core controller for storage classes, so will be added by the migration controller
 	return newVM, nil
 }
 
@@ -549,7 +549,7 @@ type networkInfo struct {
 	MappedNetwork string
 }
 
-func mapNetworkCards(networkCards []networkInfo, mapping []importjob.NetworkMapping) []networkInfo {
+func mapNetworkCards(networkCards []networkInfo, mapping []migration.NetworkMapping) []networkInfo {
 	var retNetwork []networkInfo
 	for _, nc := range networkCards {
 		for _, m := range mapping {

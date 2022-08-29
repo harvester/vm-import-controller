@@ -2,7 +2,7 @@ package openstack
 
 import (
 	"context"
-	importjob "github.com/harvester/vm-import-controller/pkg/apis/importjob.harvesterhci.io/v1beta1"
+	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/server"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
@@ -19,8 +19,9 @@ func TestMain(t *testing.M) {
 	var err error
 
 	// skip tests, needed for current builds
-	_, ok := os.LookupEnv("USE_EXISTING")
+	_, ok := os.LookupEnv("USE_EXISTING_CLUSTER")
 	if !ok {
+		logrus.Warn("skipping tests")
 		return
 	}
 
@@ -67,8 +68,8 @@ func Test_IsPoweredOff(t *testing.T) {
 	assert := require.New(t)
 	vmName, ok := os.LookupEnv("OS_VM_NAME")
 	assert.True(ok, "expected env variable VM_NAME to be set")
-	vm := &importjob.VirtualMachine{
-		Spec: importjob.VirtualMachineImportSpec{
+	vm := &migration.VirtualMachineImport{
+		Spec: migration.VirtualMachineImportSpec{
 			VirtualMachineName: vmName,
 		},
 	}
@@ -80,8 +81,8 @@ func Test_PowerOffVirtualMachine(t *testing.T) {
 	assert := require.New(t)
 	vmName, ok := os.LookupEnv("OS_VM_NAME")
 	assert.True(ok, "expected env variable VM_NAME to be set")
-	vm := &importjob.VirtualMachine{
-		Spec: importjob.VirtualMachineImportSpec{
+	vm := &migration.VirtualMachineImport{
+		Spec: migration.VirtualMachineImportSpec{
 			VirtualMachineName: vmName,
 		},
 	}
@@ -93,8 +94,8 @@ func Test_ExportVirtualMachine(t *testing.T) {
 	assert := require.New(t)
 	vmName, ok := os.LookupEnv("OS_VM_NAME")
 	assert.True(ok, "expected env variable VM_NAME to be set")
-	vm := &importjob.VirtualMachine{
-		Spec: importjob.VirtualMachineImportSpec{
+	vm := &migration.VirtualMachineImport{
+		Spec: migration.VirtualMachineImportSpec{
 			VirtualMachineName: vmName,
 		},
 	}
@@ -108,8 +109,8 @@ func Test_GenerateVirtualMachine(t *testing.T) {
 	assert := require.New(t)
 	vmName := os.Getenv("OS_VM_NAME")
 	assert.NotEmpty(vmName, "expected env variable VM_NAME to be set")
-	vm := &importjob.VirtualMachine{
-		Spec: importjob.VirtualMachineImportSpec{
+	vm := &migration.VirtualMachineImport{
+		Spec: migration.VirtualMachineImportSpec{
 			VirtualMachineName: vmName,
 		},
 	}
