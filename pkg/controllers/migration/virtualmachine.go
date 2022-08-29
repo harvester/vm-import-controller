@@ -31,6 +31,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
+const (
+	vmiAnnotation = "migaration.harvesterhci.io/virtualmachineimport"
+)
+
 type VirtualMachineOperations interface {
 	// ExportVirtualMachine is responsible for generating the raw images for each disk associated with the VirtualMachineImport
 	// Any image format conversion will be performed by the VM Operation
@@ -203,7 +207,7 @@ func (h *virtualMachineHandler) preFlightChecks(vm *migration.VirtualMachineImpo
 	var err error
 
 	switch strings.ToLower(vm.Spec.SourceCluster.Kind) {
-	case "vmware", "openstack":
+	case "vmwaresource", "openstacksource":
 		ss, err = h.generateSource(vm)
 		if err != nil {
 			return fmt.Errorf("error generating migration in preflight checks :%v", err)
@@ -322,13 +326,13 @@ func (h *virtualMachineHandler) generateVMO(vm *migration.VirtualMachineImport) 
 func (h *virtualMachineHandler) generateSource(vm *migration.VirtualMachineImport) (migration.SourceInterface, error) {
 	var s migration.SourceInterface
 	var err error
-	if strings.ToLower(vm.Spec.SourceCluster.Kind) == "vmware" {
+	if strings.ToLower(vm.Spec.SourceCluster.Kind) == "vmwaresource" {
 		s, err = h.vmware.Get(vm.Spec.SourceCluster.Namespace, vm.Spec.SourceCluster.Name, metav1.GetOptions{})
 		if err != nil {
 			return nil, err
 		}
 	}
-	if strings.ToLower(vm.Spec.SourceCluster.Kind) == "openstack" {
+	if strings.ToLower(vm.Spec.SourceCluster.Kind) == "openstacksource" {
 		s, err = h.openstack.Get(vm.Spec.SourceCluster.Namespace, vm.Spec.SourceCluster.Name, metav1.GetOptions{})
 		if err != nil {
 			return nil, err
@@ -470,12 +474,30 @@ func (h *virtualMachineHandler) createVirtualMachine(vm *migration.VirtualMachin
 
 	runVM.Spec.Template.Spec.Volumes = vmVols
 	runVM.Spec.Template.Spec.Domain.Devices.Disks = disks
-	runVMObj, err := h.kubevirt.Create(runVM)
-	if err != nil {
-		return fmt.Errorf("error creating kubevirt VM in createVirtualMachine :%v", err)
+	// apply virtualmachineimport annotation
+
+	if runVM.GetAnnotations() == nil {
+		runVM.Annotations = make(map[string]string)
+	}
+	runVM.Annotations[vmiAnnotation] = fmt.Sprintf("%s-%s", vm.Name, vm.Namespace)
+
+	found := false
+	existingVMO, err := h.kubevirt.Get(runVM.Namespace, runVM.Name, metav1.GetOptions{})
+	if err == nil {
+		if existingVMO.Annotations[vmiAnnotation] == fmt.Sprintf("%s-%s", vm.Name, vm.Namespace) {
+			found = true
+			vm.Status.NewVirtualMachine = existingVMO.Name
+		}
 	}
 
-	vm.Status.NewVirtualMachine = runVMObj.Name
+	if !found {
+		runVMObj, err := h.kubevirt.Create(runVM)
+		if err != nil {
+			return fmt.Errorf("error creating kubevirt VM in createVirtualMachine :%v", err)
+		}
+		vm.Status.NewVirtualMachine = runVMObj.Name
+	}
+
 	return nil
 }
 
@@ -493,7 +515,7 @@ func (h *virtualMachineHandler) ReconcileVMI(_ string, _ string, obj runtime.Obj
 		owners := vmiObj.GetOwnerReferences()
 		if vmiObj.DeletionTimestamp == nil {
 			for _, v := range owners {
-				if strings.ToLower(v.Kind) == "virtualmachine" {
+				if strings.ToLower(v.Kind) == "virtualmachineimport" {
 					return []relatedresource.Key{
 						{
 							Namespace: vmiObj.Namespace,

@@ -17,7 +17,7 @@ const (
 	sourceCluster     = "vmware-integration"
 	virtualmachine    = "vm-export-test"
 	defaultNamespace  = "default"
-	defaultKind       = "vmware"
+	defaultKind       = "VmwareSource"
 	defaultAPIVersion = "migration.harvesterhci.io/v1beta1"
 )
 

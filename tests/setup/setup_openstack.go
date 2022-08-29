@@ -15,7 +15,7 @@ import (
 const (
 	openstackSecret         = "openstack-integration"
 	openstackSourceCluster  = "openstack-integration"
-	openstackKind           = "openstack"
+	openstackKind           = "OpenstackSource"
 	openstackVirtualMachine = "openstack-vm-export"
 )
 

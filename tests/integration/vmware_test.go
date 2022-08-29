@@ -95,7 +95,7 @@ var _ = Describe("test vmware export/import integration", func() {
 					}
 				}
 				return nil
-			}, "1800s", "60s").ShouldNot(HaveOccurred())
+			}, "300s", "10s").ShouldNot(HaveOccurred())
 		})
 
 		By("checking that PVC claim has been created", func() {
@@ -126,7 +126,7 @@ var _ = Describe("test vmware export/import integration", func() {
 				}
 
 				return nil
-			}, "30s", "5s").ShouldNot(HaveOccurred())
+			}, "120s", "10s").ShouldNot(HaveOccurred())
 		})
 
 		By("checking that the virtualmachine has been created", func() {
