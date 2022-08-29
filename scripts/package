@@ -4,7 +4,7 @@ set -e
 source $(dirname $0)/version
 cd $(dirname $0)/..
 
-IMAGE=${REPO}/vm-import-controller:${TAG}
+IMAGE=${REPO}/harvester-vm-import-controller:${TAG}
 DOCKERFILE=package/Dockerfile
 
 docker build -f ${DOCKERFILE} -t ${IMAGE}  .
