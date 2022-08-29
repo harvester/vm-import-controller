@@ -112,7 +112,7 @@ spec:
   sourceCluster: 
     name: vcsim
     namespace: default
-    kind: Vmware
+    kind: VmwareSource
     apiVersion: migration.harvesterhci.io/v1beta1
 ```
 
@@ -152,7 +152,7 @@ spec:
   sourceCluster: 
     name: devstack
     namespace: default
-    kind: Openstack
+    kind: OpenstackSource
     apiVersion: migration.harvesterhci.io/v1beta1
 ```
 

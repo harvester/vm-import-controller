@@ -5,7 +5,6 @@ metadata:
 rules:
 - apiGroups:
   - migration.harvesterhci.io
-  - importjob.harvesterhci.io
   resources:
   - "*"
   verbs:
