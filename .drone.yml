@@ -28,28 +28,26 @@ steps:
   - name: docker
     path: /var/run/docker.sock
 
-- name: docker-publish-branch
+- name: docker-publish-master
   image: plugins/docker
   settings:
     build_args:
-    - ARCH=amd64
-    - VERSION=${DRONE_BRANCH}-${DRONE_COMMIT_SHA:0:8}-head
-    context: package/
-    custom_dns: 1.1.1.1
+      - ARCH=amd64
+      - VERSION=${DRONE_BRANCH}-${DRONE_COMMIT_SHA:0:8}-head
     dockerfile: package/Dockerfile
     password:
       from_secret: docker_password
-    repo: "rancher/harvester-vm-import-controller"
-    tag: ${DRONE_BRANCH}-head-amd64
+    repo:  "rancher/harvester-vm-import-controller"
+    tag: ${DRONE_BRANCH}-head
     username:
       from_secret: docker_username
   when:
     ref:
       include:
-      - "refs/heads/master"
-      - "refs/heads/v*"
+        - "refs/heads/master"
+        - "refs/heads/release/v*"
     event:
-    - push
+      - push
 
 - name: docker-publish
   image: plugins/docker
@@ -63,7 +61,7 @@ steps:
     password:
       from_secret: docker_password
     repo: "rancher/harvester-vm-import-controller"
-    tag: "${DRONE_TAG}-amd64"
+    tag: "${DRONE_TAG}"
     username:
       from_secret: docker_username
   when:
