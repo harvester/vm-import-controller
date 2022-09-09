@@ -32,7 +32,6 @@ steps:
   image: plugins/docker
   settings:
     build_args:
-      - ARCH=amd64
       - VERSION=${DRONE_BRANCH}-${DRONE_COMMIT_SHA:0:8}-head
     dockerfile: package/Dockerfile
     password:
@@ -42,10 +41,7 @@ steps:
     username:
       from_secret: docker_username
   when:
-    ref:
-      include:
-        - "refs/heads/master"
-        - "refs/heads/release/v*"
+    branch: main
     event:
       - push
 
@@ -53,9 +49,7 @@ steps:
   image: plugins/docker
   settings:
     build_args:
-    - ARCH=amd64
     - "VERSION=${DRONE_TAG}"
-    context: package/
     custom_dns: 1.1.1.1
     dockerfile: package/Dockerfile
     password:
@@ -68,7 +62,7 @@ steps:
     instance:
     - drone-publish.rancher.io
     ref:
-    - refs/head/master
+    - refs/head/main
     - refs/tags/*
     event:
     - tag
