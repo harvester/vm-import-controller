@@ -2,13 +2,15 @@ package qemu
 
 import (
 	"os/exec"
+	"syscall"
 )
 
-const defaultCommand = "qemu-img"
+const defaultCommand = "qemu-wrapper.sh"
 
 func ConvertVMDKtoRAW(source, target string) error {
 	args := []string{"convert", "-f", "vmdk", "-O", "raw", source, target}
 	cmd := exec.Command(defaultCommand, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{}
 	return cmd.Run()
 }
 

@@ -58,7 +58,7 @@ func TempDir() string {
 // Address returns the address for vm-import url. For local testing set env variable
 // SVC_ADDRESS to point to a local endpoint
 func Address() string {
-	address := "vm-import-controller.harvester-system.svc"
+	address := "harvester-vm-import-controller.harvester-system.svc"
 	if val := os.Getenv("SVC_ADDRESS"); val != "" {
 		address = val
 	}

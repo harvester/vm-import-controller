@@ -1,5 +1,7 @@
-FROM alpine:3.15.0
-RUN apk add qemu-img
+FROM registry.suse.com/bci/bci-base:15.4
+RUN  zypper -n rm container-suseconnect && \
+     zypper -n in qemu-tools
+COPY package/qemu-wrapper.sh /usr/bin/qemu-wrapper.sh
 COPY bin/vm-import-controller /usr/bin/vm-import-controller
 USER 1000
 CMD ["vm-import-controller"]
