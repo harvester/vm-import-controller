@@ -1,6 +1,7 @@
 #!/bin/bash
 set -e
 
+cp /go/src/github.com/harvester/vm-import-controller/package/qemu-wrapper.sh /usr/bin/
 mkdir -p bin
 if [ -e ./scripts/$1 ]; then
     ./scripts/"$@"
