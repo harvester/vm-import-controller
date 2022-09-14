@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"os"
 
@@ -12,11 +11,11 @@ import (
 
 const defaultPort = 8080
 
-var tmpDir string
+const tmpDir = "/tmp/vm-import-controller"
 
 func NewServer(ctx context.Context) error {
 	var err error
-	tmpDir, err = createTmpDir()
+	err = createTmpDir()
 	if err != nil {
 		return err
 	}
@@ -43,8 +42,13 @@ func newServer(ctx context.Context, path string) error {
 	return eg.Wait()
 }
 
-func createTmpDir() (string, error) {
-	return ioutil.TempDir("/tmp", "vm-import-controller-")
+func createTmpDir() error {
+	if _, err := os.Stat(tmpDir); os.IsNotExist(err) {
+		return os.Mkdir("/tmp/vm-import-controller", 0755)
+	} else {
+		return err
+	}
+	return nil
 }
 
 func DefaultPort() int {

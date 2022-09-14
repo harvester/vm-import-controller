@@ -17,7 +17,7 @@ func Test_NewServer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	assert := require.New(t)
 	var err error
-	tmpDir, err = createTmpDir()
+	err = createTmpDir()
 	assert.NoError(err, "expected no error during creation of tmp dir")
 	go func() {
 		err = newServer(ctx, tmpDir)
