@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/validation"
 	kubevirt "kubevirt.io/api/core/v1"
 
 	harvesterv1beta1 "github.com/harvester/harvester/pkg/apis/harvesterhci.io/v1beta1"
@@ -78,17 +79,24 @@ func RegisterVMImportController(ctx context.Context, vmware migrationController.
 	importVM.OnChange(ctx, "virtualmachine-import-job-change", vmHandler.OnVirtualMachineChange)
 }
 
-func (h *virtualMachineHandler) OnVirtualMachineChange(key string, vm *migration.VirtualMachineImport) (*migration.VirtualMachineImport, error) {
+func (h *virtualMachineHandler) OnVirtualMachineChange(key string, vmObj *migration.VirtualMachineImport) (*migration.VirtualMachineImport, error) {
 
-	if vm == nil || vm.DeletionTimestamp != nil {
-		return vm, nil
+	if vmObj == nil || vmObj.DeletionTimestamp != nil {
+		return nil, nil
 	}
 
+	vm := vmObj.DeepCopy()
 	switch vm.Status.Status {
 	case "": // run preflight checks and make vm ready for import
 		err := h.preFlightChecks(vm)
 		if err != nil {
-			return vm, err
+			if err.Error() == migration.NotValidDNS1123Label {
+				logrus.Errorf("vm migration target %s in VM %s in namespace %s is not RFC 1123 compliant", vm.Spec.VirtualMachineName, vm.Name, vm.Namespace)
+				vm.Status.Status = migration.VirtualMachineInvalid
+				h.importVM.UpdateStatus(vm)
+			} else {
+				return vm, err
+			}
 		}
 		vm.Status.Status = migration.SourceReady
 		return h.importVM.UpdateStatus(vm)
@@ -103,6 +111,14 @@ func (h *virtualMachineHandler) OnVirtualMachineChange(key string, vm *migration
 		return h.importVM.UpdateStatus(vm)
 	case migration.DisksExported: // prepare and add routes for disks to be used for VirtualMachineImage CRD
 		orgStatus := vm.Status.DeepCopy()
+		// If VM has no disks associated ignore the VM
+		if len(orgStatus.DiskImportStatus) == 0 {
+			logrus.Errorf("Imported VM %s in namespace %s, has no disks, being marked as invalid and will be ignored", vm.Name, vm.Namespace)
+			vm.Status.Status = migration.VirtualMachineInvalid
+			return h.importVM.UpdateStatus(vm)
+
+		}
+
 		err := h.createVirtualMachineImages(vm)
 		if err != nil {
 			// check if any disks have been updated. We need to save this info to eventually reconcile the VMI creation
@@ -192,6 +208,9 @@ func (h *virtualMachineHandler) OnVirtualMachineChange(key string, vm *migration
 	case migration.VirtualMachineRunning:
 		logrus.Infof("vm %s in namespace %v imported successfully", vm.Name, vm.Namespace)
 		return vm, h.tidyUpObjects(vm)
+	case migration.VirtualMachineInvalid:
+		logrus.Infof("vm %s in namespace %v has an invalid spec", vm.Name, vm.Namespace)
+		return vm, nil
 	}
 
 	return vm, nil
@@ -199,6 +218,11 @@ func (h *virtualMachineHandler) OnVirtualMachineChange(key string, vm *migration
 
 // preFlightChecks is used to validate that the associate sources and VM migration references are valid
 func (h *virtualMachineHandler) preFlightChecks(vm *migration.VirtualMachineImport) error {
+
+	if errs := validation.IsDNS1123Label(vm.Spec.VirtualMachineName); len(errs) != 0 {
+		return fmt.Errorf(migration.NotValidDNS1123Label)
+	}
+
 	if vm.Spec.SourceCluster.APIVersion != "migration.harvesterhci.io/v1beta1" {
 		return fmt.Errorf("expected migration cluster apiversion to be migration.harvesterhci.io/v1beta1 but got %s", vm.Spec.SourceCluster.APIVersion)
 	}

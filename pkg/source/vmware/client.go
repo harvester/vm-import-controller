@@ -146,6 +146,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 
 	u := lease.StartUpdater(c.ctx, info)
 	defer u.Done()
+	defer lease.Complete(c.ctx)
 
 	for _, i := range info.Items {
 		// ignore iso and nvram disks
@@ -198,8 +199,17 @@ func (c *Client) PowerOffVirtualMachine(vm *migration.VirtualMachineImport) erro
 		return fmt.Errorf("error finding vm in PowerOffVirtualMachine: %v", err)
 	}
 
-	_, err = vmObj.PowerOff(c.ctx)
-	return err
+	ok, err := c.IsPoweredOff(vm)
+	if err != nil {
+		return err
+	}
+
+	if !ok {
+		_, err = vmObj.PowerOff(c.ctx)
+		return err
+	}
+
+	return nil
 }
 
 func (c *Client) IsPoweredOff(vm *migration.VirtualMachineImport) (bool, error) {

@@ -147,6 +147,7 @@ var _ = Describe("test vmware export/import integration", func() {
 			}, "300s", "10s").ShouldNot(HaveOccurred())
 		})
 
+		// can take upto 5 mins for the VM to be marked as running
 		By("checking that the virtualmachineimage ownership has been removed", func() {
 			Eventually(func() error {
 				v := &migration.VirtualMachineImport{}
@@ -169,7 +170,7 @@ var _ = Describe("test vmware export/import integration", func() {
 				}
 
 				return nil
-			}, "300s", "10s").ShouldNot(HaveOccurred())
+			}, "600s", "30s").ShouldNot(HaveOccurred())
 		})
 
 	})

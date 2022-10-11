@@ -66,10 +66,12 @@ const (
 	DiskImagesFailed             ImportStatus   = "diskImageFailed"
 	VirtualMachineCreated        ImportStatus   = "virtualMachineCreated"
 	VirtualMachineRunning        ImportStatus   = "virtualMachineRunning"
+	VirtualMachineInvalid        ImportStatus   = "virtualMachineInvalid"
 	VirtualMachinePoweringOff    condition.Cond = "VMPoweringOff"
 	VirtualMachinePoweredOff     condition.Cond = "VMPoweredOff"
 	VirtualMachineExported       condition.Cond = "VMExported"
 	VirtualMachineImageSubmitted condition.Cond = "VirtualMachineImageSubmitted"
 	VirtualMachineImageReady     condition.Cond = "VirtualMachineImageReady"
 	VirtualMachineImageFailed    condition.Cond = "VirtualMachineImageFailed"
+	NotValidDNS1123Label         string         = "not a valid DNS1123 label"
 )
