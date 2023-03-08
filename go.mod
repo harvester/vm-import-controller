@@ -10,7 +10,7 @@ require (
 	github.com/onsi/gomega v1.19.0
 	github.com/ory/dockertest/v3 v3.9.1
 	github.com/rancher/lasso v0.0.0-20221227210133-6ea88ca2fbcc
-	github.com/rancher/wrangler v1.0.1-0.20220520195731-8eeded9bae2a
+	github.com/rancher/wrangler v1.1.0
 	github.com/sirupsen/logrus v1.9.0
 	github.com/stretchr/testify v1.8.1
 	github.com/vmware/govmomi v0.29.0
@@ -132,7 +132,6 @@ replace (
 	github.com/operator-framework/operator-lifecycle-manager => github.com/operator-framework/operator-lifecycle-manager v0.0.0-20190128024246-5eb7ae5bdb7a
 	github.com/rancher/rancher/pkg/apis => github.com/rancher/rancher/pkg/apis v0.0.0-20211208233239-77392a65423d
 	github.com/rancher/rancher/pkg/client => github.com/rancher/rancher/pkg/client v0.0.0-20211208233239-77392a65423d
-	github.com/rancher/wrangler => github.com/rancher/wrangler v1.1.0
 	golang.org/x/net => golang.org/x/net v0.8.0
 	golang.org/x/text => golang.org/x/text v0.3.8
 	k8s.io/api => k8s.io/api v0.23.7 // Dropped to v0.20.2 to handle kubevirt deps for installing CRDs
