@@ -67,10 +67,17 @@ func Register(ctx context.Context, restConfig *rest.Config) error {
 	harvesterFactory, err := harvester.NewFactoryFromConfigWithOptions(restConfig, &harvester.FactoryOptions{
 		SharedControllerFactory: scf,
 	})
+	if err != nil {
+		return err
+	}
 
 	kubevirtFactory, err := kubevirt.NewFactoryFromConfigWithOptions(restConfig, &kubevirt.FactoryOptions{
 		SharedControllerFactory: scf,
 	})
+	if err != nil {
+		return err
+	}
+	
 	sc.RegisterVmareController(ctx, migrationFactory.Migration().V1beta1().VmwareSource(), coreFactory.Core().V1().Secret())
 	sc.RegisterOpenstackController(ctx, migrationFactory.Migration().V1beta1().OpenstackSource(), coreFactory.Core().V1().Secret())
 
