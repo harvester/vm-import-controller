@@ -6,11 +6,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"time"
 
+	coreControllers "github.com/rancher/wrangler/pkg/generated/controllers/core/v1"
+	"github.com/rancher/wrangler/pkg/relatedresource"
+	"github.com/sirupsen/logrus"
+	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation"
 	kubevirt "kubevirt.io/api/core/v1"
 
@@ -25,17 +32,11 @@ import (
 	"github.com/harvester/vm-import-controller/pkg/source/openstack"
 	"github.com/harvester/vm-import-controller/pkg/source/vmware"
 	"github.com/harvester/vm-import-controller/pkg/util"
-	coreControllers "github.com/rancher/wrangler/pkg/generated/controllers/core/v1"
-	"github.com/rancher/wrangler/pkg/relatedresource"
-	"github.com/sirupsen/logrus"
-	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 )
 
 const (
-	vmiAnnotation = "migaration.harvesterhci.io/virtualmachineimport"
+	vmiAnnotation    = "migaration.harvesterhci.io/virtualmachineimport"
+	imageDisplayName = "harvesterhci.io/imageDisplayName"
 )
 
 type VirtualMachineOperations interface {
@@ -90,103 +91,26 @@ func (h *virtualMachineHandler) OnVirtualMachineChange(key string, vmObj *migrat
 	vm := vmObj.DeepCopy()
 	switch vm.Status.Status {
 	case "": // run preflight checks and make vm ready for import
-		err := h.preFlightChecks(vm)
-		if err != nil {
-			if err.Error() == migration.NotValidDNS1123Label {
-				logrus.Errorf("vm migration target %s in VM %s in namespace %s is not RFC 1123 compliant", vm.Spec.VirtualMachineName, vm.Name, vm.Namespace)
-				vm.Status.Status = migration.VirtualMachineInvalid
-				h.importVM.UpdateStatus(vm)
-			} else {
-				return vm, err
-			}
-		}
-		vm.Status.Status = migration.SourceReady
-		return h.importVM.UpdateStatus(vm)
+		return h.reconcilePreFlightChecks(vm)
 	case migration.SourceReady: //vm migration is valid and ready. trigger migration specific import
-		err := h.triggerExport(vm)
-		if err != nil {
-			return vm, err
-		}
-		if util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineExported, v1.ConditionTrue) {
-			vm.Status.Status = migration.DisksExported
-		}
-		return h.importVM.UpdateStatus(vm)
+		return h.runVirtualMachineExport(vm)
 	case migration.DisksExported: // prepare and add routes for disks to be used for VirtualMachineImage CRD
-		orgStatus := vm.Status.DeepCopy()
-		// If VM has no disks associated ignore the VM
-		if len(orgStatus.DiskImportStatus) == 0 {
-			logrus.Errorf("Imported VM %s in namespace %s, has no disks, being marked as invalid and will be ignored", vm.Name, vm.Namespace)
-			vm.Status.Status = migration.VirtualMachineInvalid
-			return h.importVM.UpdateStatus(vm)
-
-		}
-
-		err := h.createVirtualMachineImages(vm)
-		if err != nil {
-			// check if any disks have been updated. We need to save this info to eventually reconcile the VMI creation
-			var newVM *migration.VirtualMachineImport
-			var newErr error
-			if !reflect.DeepEqual(orgStatus.DiskImportStatus, vm.Status.DiskImportStatus) {
-				newVM, newErr = h.importVM.UpdateStatus(vm)
-			}
-
-			if newErr != nil {
-				logrus.Errorf("error updating status for vm status %s: %v", vm.Name, newErr)
-			}
-			return newVM, err
-		}
-
-		ok := true
-		for _, d := range vm.Status.DiskImportStatus {
-			ok = util.ConditionExists(d.DiskConditions, migration.VirtualMachineImageSubmitted, v1.ConditionTrue) && ok
-		}
-
-		if ok {
-			vm.Status.Status = migration.DiskImagesSubmitted
-		}
-		return h.importVM.UpdateStatus(vm)
+		return h.reconcileDiskImageStatus(vm)
 	case migration.DiskImagesSubmitted:
 		// check and update disk image status based on VirtualMachineImage watches
 		err := h.reconcileVMIStatus(vm)
 		if err != nil {
 			return vm, err
 		}
-		ok := true
-		failed := false
-		var failedCount, passedCount int
-		for _, d := range vm.Status.DiskImportStatus {
-			ok = util.ConditionExists(d.DiskConditions, migration.VirtualMachineImageReady, v1.ConditionTrue) && ok
-			if ok {
-				passedCount++
-			}
-			failed = util.ConditionExists(d.DiskConditions, migration.VirtualMachineImageFailed, v1.ConditionTrue) || failed
-			if failed {
-				failedCount++
-			}
-		}
 
-		if len(vm.Status.DiskImportStatus) != failedCount+passedCount {
-			// if length's dont match, then we have disks with missing status. Lets ignore failures for now, and handle
-			// disk failures once we have had watches triggered for all disks
+		newStatus := evaluateDiskImportStatus(vm.Status.DiskImportStatus)
+		if newStatus == nil {
 			return vm, nil
 		}
-
-		if ok {
-			vm.Status.Status = migration.DiskImagesReady
-		}
-
-		if failed {
-			vm.Status.Status = migration.DiskImagesFailed
-		}
+		vm.Status.Status = *newStatus
 		return h.importVM.UpdateStatus(vm)
 	case migration.DiskImagesFailed:
-		// re-export VM and trigger re-import again
-		err := h.cleanupAndResubmit(vm)
-		if err != nil {
-			return vm, err
-		}
-		vm.Status.Status = migration.SourceReady
-		return h.importVM.UpdateStatus(vm)
+		return h.triggerResubmit(vm)
 	case migration.DiskImagesReady:
 		// create VM to use the VirtualMachineObject
 		err := h.createVirtualMachine(vm)
@@ -197,16 +121,7 @@ func (h *virtualMachineHandler) OnVirtualMachineChange(key string, vmObj *migrat
 		return h.importVM.UpdateStatus(vm)
 	case migration.VirtualMachineCreated:
 		// wait for VM to be running using a watch on VM's
-		ok, err := h.checkVirtualMachine(vm)
-		if err != nil {
-			return vm, err
-		}
-		if ok {
-			vm.Status.Status = migration.VirtualMachineRunning
-			h.importVM.UpdateStatus(vm)
-		}
-		// by default we will poll again after 5 mins
-		h.importVM.EnqueueAfter(vm.Namespace, vm.Name, 5*time.Minute)
+		return h.reconcileVirtualMachineStatus(vm)
 	case migration.VirtualMachineRunning:
 		logrus.Infof("vm %s in namespace %v imported successfully", vm.Name, vm.Namespace)
 		return vm, h.tidyUpObjects(vm)
@@ -373,26 +288,7 @@ func (h *virtualMachineHandler) createVirtualMachineImages(vm *migration.Virtual
 	status := vm.Status.DeepCopy()
 	for i, d := range status.DiskImportStatus {
 		if !util.ConditionExists(d.DiskConditions, migration.VirtualMachineImageSubmitted, v1.ConditionTrue) {
-			vmi := &harvesterv1beta1.VirtualMachineImage{
-				ObjectMeta: metav1.ObjectMeta{
-					GenerateName: "image-",
-					Namespace:    vm.Namespace,
-					OwnerReferences: []metav1.OwnerReference{
-						{
-							APIVersion: vm.APIVersion,
-							Kind:       vm.Kind,
-							UID:        vm.UID,
-							Name:       vm.Name,
-						},
-					},
-				},
-				Spec: harvesterv1beta1.VirtualMachineImageSpec{
-					DisplayName: fmt.Sprintf("vm-import-%s-%s", vm.Name, d.Name),
-					URL:         fmt.Sprintf("http://%s:%d/%s", server.Address(), server.DefaultPort(), d.Name),
-					SourceType:  "download",
-				},
-			}
-			vmiObj, err := h.vmi.Create(vmi)
+			vmiObj, err := h.checkAndCreateVirtualMachineImage(vm, d)
 			if err != nil {
 				return fmt.Errorf("error creating vmi: %v", err)
 			}
@@ -675,4 +571,47 @@ func generateAnnotations(vm *migration.VirtualMachineImport, vmi *harvesterv1bet
 		"harvesterhci.io/imageId":        fmt.Sprintf("%s/%s", vmi.Namespace, vmi.Name),
 	}
 	return annotations, nil
+}
+
+func (h *virtualMachineHandler) checkAndCreateVirtualMachineImage(vm *migration.VirtualMachineImport, d migration.DiskInfo) (*harvesterv1beta1.VirtualMachineImage, error) {
+	imageList, err := h.vmi.Cache().List(vm.Namespace, labels.SelectorFromSet(map[string]string{
+		imageDisplayName: fmt.Sprintf("vm-import-%s-%s", vm.Name, d.Name),
+	}))
+
+	if err != nil {
+		return nil, err
+	}
+
+	if len(imageList) > 1 {
+		return nil, fmt.Errorf("unexpected error: found %d images with label %s=%s, only expected to find one", len(imageList), imageDisplayName, fmt.Sprintf("vm-import-%s-%s", vm.Name, d.Name))
+	}
+
+	if len(imageList) == 1 {
+		return imageList[0], nil
+	}
+
+	// no image found create a new VMI and return object
+	vmi := &harvesterv1beta1.VirtualMachineImage{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "image-",
+			Namespace:    vm.Namespace,
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: vm.APIVersion,
+					Kind:       vm.Kind,
+					UID:        vm.UID,
+					Name:       vm.Name,
+				},
+			},
+			Labels: map[string]string{
+				imageDisplayName: fmt.Sprintf("vm-import-%s-%s", vm.Name, d.Name),
+			},
+		},
+		Spec: harvesterv1beta1.VirtualMachineImageSpec{
+			DisplayName: fmt.Sprintf("vm-import-%s-%s", vm.Name, d.Name),
+			URL:         fmt.Sprintf("http://%s:%d/%s", server.Address(), server.DefaultPort(), d.Name),
+			SourceType:  "download",
+		},
+	}
+	return h.vmi.Create(vmi)
 }
