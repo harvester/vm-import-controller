@@ -21,7 +21,7 @@ func Test_NewServer(t *testing.T) {
 	assert.NoError(err, "expected no error during creation of tmp dir")
 	go func() {
 		err = newServer(ctx, tmpDir)
-		assert.Contains(err.Error(), "context canceled", "error occured during shutdown") //only expected error is context canceled
+		assert.Contains(err.Error(), "http: Server closed", "error occured during shutdown") //only expected error is context canceled
 	}()
 	time.Sleep(1 * time.Second)
 	f, err := ioutil.TempFile(TempDir(), "sample")
