@@ -132,7 +132,7 @@ replace (
 	github.com/operator-framework/operator-lifecycle-manager => github.com/operator-framework/operator-lifecycle-manager v0.0.0-20190128024246-5eb7ae5bdb7a
 	github.com/rancher/rancher/pkg/apis => github.com/rancher/rancher/pkg/apis v0.0.0-20211208233239-77392a65423d
 	github.com/rancher/rancher/pkg/client => github.com/rancher/rancher/pkg/client v0.0.0-20211208233239-77392a65423d
-	golang.org/x/net => golang.org/x/net v0.8.0
+	golang.org/x/net => golang.org/x/net v0.17.0
 	golang.org/x/text => golang.org/x/text v0.3.8
 	k8s.io/api => k8s.io/api v0.23.7 // Dropped to v0.20.2 to handle kubevirt deps for installing CRDs
 	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.23.7
