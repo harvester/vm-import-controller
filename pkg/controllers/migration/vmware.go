@@ -5,16 +5,16 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/harvester/vm-import-controller/pkg/apis/common"
+	corecontrollers "github.com/rancher/wrangler/pkg/generated/controllers/core/v1"
 	"github.com/sirupsen/logrus"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/harvester/vm-import-controller/pkg/apis/common"
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	migrationController "github.com/harvester/vm-import-controller/pkg/generated/controllers/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/source/vmware"
 	"github.com/harvester/vm-import-controller/pkg/util"
-	corecontrollers "github.com/rancher/wrangler/pkg/generated/controllers/core/v1"
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type vmwareHandler struct {

@@ -6,9 +6,6 @@ import (
 
 	harvester "github.com/harvester/harvester/pkg/generated/controllers/harvesterhci.io"
 	"github.com/harvester/harvester/pkg/generated/controllers/kubevirt.io"
-	sc "github.com/harvester/vm-import-controller/pkg/controllers/migration"
-	"github.com/harvester/vm-import-controller/pkg/crd"
-	"github.com/harvester/vm-import-controller/pkg/generated/controllers/migration.harvesterhci.io"
 	"github.com/rancher/lasso/pkg/cache"
 	"github.com/rancher/lasso/pkg/client"
 	"github.com/rancher/lasso/pkg/controller"
@@ -16,6 +13,10 @@ import (
 	"github.com/rancher/wrangler/pkg/start"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
+
+	sc "github.com/harvester/vm-import-controller/pkg/controllers/migration"
+	"github.com/harvester/vm-import-controller/pkg/crd"
+	"github.com/harvester/vm-import-controller/pkg/generated/controllers/migration.harvesterhci.io"
 )
 
 func Start(ctx context.Context, restConfig *rest.Config) error {
@@ -77,7 +78,7 @@ func Register(ctx context.Context, restConfig *rest.Config) error {
 	if err != nil {
 		return err
 	}
-	
+
 	sc.RegisterVmareController(ctx, migrationFactory.Migration().V1beta1().VmwareSource(), coreFactory.Core().V1().Secret())
 	sc.RegisterOpenstackController(ctx, migrationFactory.Migration().V1beta1().OpenstackSource(), coreFactory.Core().V1().Secret())
 

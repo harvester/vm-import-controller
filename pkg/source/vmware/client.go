@@ -3,20 +3,15 @@ package vmware
 import (
 	"context"
 	"fmt"
-	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
-	"io/ioutil"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"k8s.io/apimachinery/pkg/api/resource"
-
-	"github.com/harvester/vm-import-controller/pkg/qemu"
-	"github.com/harvester/vm-import-controller/pkg/server"
 	"github.com/sirupsen/logrus"
 	"github.com/vmware/govmomi"
 	"github.com/vmware/govmomi/find"
+	"github.com/vmware/govmomi/nfc"
 	"github.com/vmware/govmomi/object"
 	"github.com/vmware/govmomi/session"
 	"github.com/vmware/govmomi/vim25"
@@ -24,8 +19,13 @@ import (
 	"github.com/vmware/govmomi/vim25/soap"
 	"github.com/vmware/govmomi/vim25/types"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubevirt "kubevirt.io/api/core/v1"
+
+	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
+	"github.com/harvester/vm-import-controller/pkg/qemu"
+	"github.com/harvester/vm-import-controller/pkg/server"
 )
 
 type Client struct {
@@ -51,16 +51,16 @@ func NewClient(ctx context.Context, endpoint string, dc string, secret *corev1.S
 		insecure = true
 	}
 
-	endpointUrl, err := url.Parse(endpoint)
+	endpointURL, err := url.Parse(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing endpoint url: %v", err)
 	}
 
-	sc := soap.NewClient(endpointUrl, insecure)
+	sc := soap.NewClient(endpointURL, insecure)
 
 	vmwareClient := &Client{}
 	if !insecure {
-		tmpFile, err := ioutil.TempFile("/tmp", "vmware-ca-")
+		tmpFile, err := os.CreateTemp("/tmp", "vmware-ca-")
 		if err != nil {
 			return nil, fmt.Errorf("error creating tmp file for vmware ca certs: %v", err)
 		}
@@ -68,7 +68,9 @@ func NewClient(ctx context.Context, endpoint string, dc string, secret *corev1.S
 		if err != nil {
 			return nil, fmt.Errorf("error writing ca cert to tmp file %s: %v", tmpFile.Name(), err)
 		}
-		sc.SetRootCAs(tmpFile.Name())
+		if err = sc.SetRootCAs(tmpFile.Name()); err != nil {
+			return nil, err
+		}
 		vmwareClient.tmpCerts = tmpFile.Name()
 	}
 
@@ -102,7 +104,7 @@ func (c *Client) Close() error {
 	return os.Remove(c.tmpCerts)
 }
 
-// Verify checks is a verfication check for migration provider to ensure that the config is valid
+// Verify checks is a verification check for migration provider to ensure that the config is valid
 // it is used to set the condition Ready on the migration provider.
 // for vmware client we verify if the DC exists
 func (c *Client) Verify() error {
@@ -121,32 +123,46 @@ func (c *Client) Verify() error {
 	return nil
 }
 
-func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error {
-
-	tmpPath, err := ioutil.TempDir("/tmp", fmt.Sprintf("%s-%s-", vm.Name, vm.Namespace))
+func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err error) {
+	var (
+		tmpPath string
+		vmObj   *object.VirtualMachine
+		lease   *nfc.Lease
+		info    *nfc.LeaseInfo
+	)
+	tmpPath, err = os.MkdirTemp("/tmp", fmt.Sprintf("%s-%s-", vm.Name, vm.Namespace))
 
 	if err != nil {
 		return fmt.Errorf("error creating tmp dir for vmexport: %v", err)
 	}
 
-	vmObj, err := c.findVM(vm.Spec.Folder, vm.Spec.VirtualMachineName)
+	vmObj, err = c.findVM(vm.Spec.Folder, vm.Spec.VirtualMachineName)
 	if err != nil {
 		return fmt.Errorf("error finding vm in ExportVirtualMacine: %v", err)
 	}
 
-	lease, err := vmObj.Export(c.ctx)
+	lease, err = vmObj.Export(c.ctx)
 	if err != nil {
 		return fmt.Errorf("error generate export lease in ExportVirtualMachine: %v", err)
 	}
 
-	info, err := lease.Wait(c.ctx, nil)
+	info, err = lease.Wait(c.ctx, nil)
 	if err != nil {
 		return err
 	}
 
 	u := lease.StartUpdater(c.ctx, info)
 	defer u.Done()
-	defer lease.Complete(c.ctx)
+	defer func() {
+		leaseErr := lease.Complete(c.ctx)
+		if leaseErr != nil {
+			if err == nil {
+				err = leaseErr
+			} else {
+				err = fmt.Errorf("err: %w, leaseErr: %v", err, leaseErr)
+			}
+		}
+	}()
 
 	for _, i := range info.Items {
 		// ignore iso and nvram disks
@@ -181,7 +197,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 		sourceFile := filepath.Join(tmpPath, d.Name)
 		rawDiskName := strings.Split(d.Name, ".vmdk")[0] + ".img"
 		destFile := filepath.Join(server.TempDir(), rawDiskName)
-		err := qemu.ConvertVMDKtoRAW(sourceFile, destFile)
+		err = qemu.ConvertVMDKtoRAW(sourceFile, destFile)
 		if err != nil {
 			return err
 		}
@@ -281,9 +297,8 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		},
 	}
 
-	var networkConfig []kubevirt.Network
-
 	mappedNetwork := mapNetworkCards(networkInfo, vm.Spec.Mapping)
+	networkConfig := make([]kubevirt.Network, 0, len(mappedNetwork))
 	for i, v := range mappedNetwork {
 		networkConfig = append(networkConfig, kubevirt.Network{
 			NetworkSource: kubevirt.NetworkSource{
@@ -295,7 +310,7 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		})
 	}
 
-	var interfaces []kubevirt.Interface
+	interfaces := make([]kubevirt.Interface, 0, len(mappedNetwork))
 	for i, v := range mappedNetwork {
 		interfaces = append(interfaces, kubevirt.Interface{
 			Name:       fmt.Sprintf("migrated-%d", i),
@@ -349,33 +364,33 @@ type networkInfo struct {
 func identifyNetworkCards(devices []types.BaseVirtualDevice) []networkInfo {
 	var resp []networkInfo
 	for _, d := range devices {
-		switch d.(type) {
+		switch d := d.(type) {
 		case *types.VirtualVmxnet:
-			obj := d.(*types.VirtualVmxnet)
+			obj := d
 			resp = append(resp, networkInfo{
 				NetworkName: obj.DeviceInfo.GetDescription().Summary,
 				MAC:         obj.MacAddress,
 			})
 		case *types.VirtualE1000e:
-			obj := d.(*types.VirtualE1000e)
+			obj := d
 			resp = append(resp, networkInfo{
 				NetworkName: obj.DeviceInfo.GetDescription().Summary,
 				MAC:         obj.MacAddress,
 			})
 		case *types.VirtualE1000:
-			obj := d.(*types.VirtualE1000)
+			obj := d
 			resp = append(resp, networkInfo{
 				NetworkName: obj.DeviceInfo.GetDescription().Summary,
 				MAC:         obj.MacAddress,
 			})
 		case *types.VirtualVmxnet3:
-			obj := d.(*types.VirtualVmxnet3)
+			obj := d
 			resp = append(resp, networkInfo{
 				NetworkName: obj.DeviceInfo.GetDescription().Summary,
 				MAC:         obj.MacAddress,
 			})
 		case *types.VirtualVmxnet2:
-			obj := d.(*types.VirtualVmxnet2)
+			obj := d
 			resp = append(resp, networkInfo{
 				NetworkName: obj.DeviceInfo.GetDescription().Summary,
 				MAC:         obj.MacAddress,

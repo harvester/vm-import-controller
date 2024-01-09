@@ -1,10 +1,11 @@
 package v1beta1
 
 import (
-	"github.com/harvester/vm-import-controller/pkg/apis/common"
 	"github.com/rancher/wrangler/pkg/condition"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/harvester/vm-import-controller/pkg/apis/common"
 )
 
 type ClusterStatus string

@@ -2,14 +2,14 @@ package util
 
 import (
 	"testing"
-
 	"time"
 
-	"github.com/harvester/vm-import-controller/pkg/apis/common"
-	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/harvester/vm-import-controller/pkg/apis/common"
+	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 )
 
 func Test_ConditionExists(t *testing.T) {

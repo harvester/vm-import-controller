@@ -1,9 +1,10 @@
 package util
 
 import (
-	"github.com/harvester/vm-import-controller/pkg/apis/common"
 	"github.com/rancher/wrangler/pkg/condition"
 	v1 "k8s.io/api/core/v1"
+
+	"github.com/harvester/vm-import-controller/pkg/apis/common"
 )
 
 func ConditionExists(conditions []common.Condition, c condition.Cond, condType v1.ConditionStatus) bool {
