@@ -1,0 +1,27 @@
+linters:
+  disable-all: true
+  enable:
+    - goimports
+    - gofmt
+    - misspell
+    - revive
+    - gosec
+    - prealloc
+run:
+  skip-files:
+    - /zz_generated_
+    - _generated
+  skip-dirs:
+    - generated
+  deadline: 5m
+  tests: true
+  build-tags:
+    - test
+linters-settings:
+  goimports:
+    local-prefixes: github.com/harvester/vm-import-controller
+  gosec:
+    # https: //github.com/securego/gosec#available-rules
+    excludes:
+      - G101 # Look for hard coded credentials
+      - G402 # TLS InsecureSkipVerify set true
