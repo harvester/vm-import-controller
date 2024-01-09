@@ -5,14 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"github.com/gophercloud/gophercloud/openstack/blockstorage/extensions/volumeactions"
-	"github.com/gophercloud/gophercloud/openstack/compute/v2/flavors"
-	"github.com/gophercloud/gophercloud/openstack/imageservice/v2/images"
-	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
-	"github.com/harvester/vm-import-controller/pkg/qemu"
-	"github.com/harvester/vm-import-controller/pkg/server"
-	"io/ioutil"
-	"k8s.io/apimachinery/pkg/api/resource"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -21,15 +14,23 @@ import (
 	"github.com/google/uuid"
 	"github.com/gophercloud/gophercloud"
 	"github.com/gophercloud/gophercloud/openstack"
+	"github.com/gophercloud/gophercloud/openstack/blockstorage/extensions/volumeactions"
 	"github.com/gophercloud/gophercloud/openstack/blockstorage/v2/volumes"
 	"github.com/gophercloud/gophercloud/openstack/blockstorage/v3/snapshots"
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/extensions/startstop"
+	"github.com/gophercloud/gophercloud/openstack/compute/v2/flavors"
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/servers"
 	"github.com/gophercloud/gophercloud/openstack/imageservice/v2/imagedata"
+	"github.com/gophercloud/gophercloud/openstack/imageservice/v2/images"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubevirt "kubevirt.io/api/core/v1"
+
+	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
+	"github.com/harvester/vm-import-controller/pkg/qemu"
+	"github.com/harvester/vm-import-controller/pkg/server"
 )
 
 const (
@@ -165,7 +166,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 		return err
 	}
 
-	tmpDir, err := ioutil.TempDir("/tmp", "openstack-image-")
+	tmpDir, err := os.MkdirTemp("/tmp", "openstack-image-")
 	if err != nil {
 		return fmt.Errorf("error creating tmp image directory: %v", err)
 	}
@@ -244,7 +245,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			return err
 		}
 
-		imageContents, err := ioutil.ReadAll(contents)
+		imageContents, err := io.ReadAll(contents)
 		if err != nil {
 			return err
 		}
@@ -387,8 +388,8 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		},
 	}
 
-	var networkConfig []kubevirt.Network
 	mappedNetwork := mapNetworkCards(networks, vm.Spec.Mapping)
+	networkConfig := make([]kubevirt.Network, 0, len(mappedNetwork))
 	for i, v := range mappedNetwork {
 		networkConfig = append(networkConfig, kubevirt.Network{
 			NetworkSource: kubevirt.NetworkSource{
@@ -400,7 +401,7 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		})
 	}
 
-	var interfaces []kubevirt.Interface
+	interfaces := make([]kubevirt.Interface, 0, len(mappedNetwork))
 	for i, v := range mappedNetwork {
 		interfaces = append(interfaces, kubevirt.Interface{
 			Name:       fmt.Sprintf("migrated-%d", i),
@@ -496,9 +497,9 @@ func SetupOpenstackSourceFromEnv() (string, string, error) {
 // is a servername and will try and find a uuid for this server.
 // openstack allows multiple server names to have the same name, in which case an error will be returned
 func (c *Client) checkOrGetUUID(input string) (string, error) {
-	parsedUuid, err := uuid.Parse(input)
+	parsedUUID, err := uuid.Parse(input)
 	if err == nil {
-		return parsedUuid.String(), nil
+		return parsedUUID.String(), nil
 	}
 
 	// assume this is a name and find server based on name
@@ -535,11 +536,11 @@ func (c *Client) checkOrGetUUID(input string) (string, error) {
 }
 
 func (c *Client) findVM(name string) (*servers.Server, error) {
-	parsedUuid, err := c.checkOrGetUUID(name)
+	parsedUUID, err := c.checkOrGetUUID(name)
 	if err != nil {
 		return nil, err
 	}
-	return servers.Get(c.computeClient, parsedUuid).Extract()
+	return servers.Get(c.computeClient, parsedUUID).Extract()
 
 }
 

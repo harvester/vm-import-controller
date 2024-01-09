@@ -5,14 +5,13 @@ import (
 	"strings"
 
 	harvesterv1beta1 "github.com/harvester/harvester/pkg/apis/harvesterhci.io/v1beta1"
-	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
-	"github.com/harvester/vm-import-controller/pkg/util"
-	"github.com/harvester/vm-import-controller/tests/setup"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	kubevirt "kubevirt.io/api/core/v1"
+
+	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
+	"github.com/harvester/vm-import-controller/pkg/util"
+	"github.com/harvester/vm-import-controller/tests/setup"
 )
 
 var _ = Describe("test openstack export/import integration", func() {
@@ -20,7 +19,7 @@ var _ = Describe("test openstack export/import integration", func() {
 		if !useExisting {
 			return
 		}
-		err := setup.SetupOpenstack(ctx, k8sClient)
+		err := setup.Openstack(ctx, k8sClient)
 		Expect(err).ToNot(HaveOccurred())
 	})
 

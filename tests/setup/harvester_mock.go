@@ -3,11 +3,12 @@ package setup
 import (
 	"context"
 
-	harvesterv1 "github.com/harvester/harvester/pkg/apis/harvesterhci.io/v1beta1"
-	"github.com/harvester/harvester/pkg/util/crd"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/client-go/rest"
 	"kubevirt.io/kubevirt/pkg/virt-operator/resource/generate/components"
+
+	harvesterv1 "github.com/harvester/harvester/pkg/apis/harvesterhci.io/v1beta1"
+	"github.com/harvester/harvester/pkg/util/crd"
 )
 
 // InstallCRD will install the core harvester CRD's
@@ -55,14 +56,14 @@ func GenerateKubeVirtCRD() ([]*extv1.CustomResourceDefinition, error) {
 		components.NewMigrationPolicyCrd,
 	}
 
-	var result []*extv1.CustomResourceDefinition
+	results := []*extv1.CustomResourceDefinition{}
 	for _, m := range v {
 		crdList, err := m()
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, crdList)
+		results = append(results, crdList)
 	}
 
-	return result, nil
+	return results, nil
 }

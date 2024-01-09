@@ -3,18 +3,19 @@ package vmware
 import (
 	"context"
 	"fmt"
-	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"log"
 	"os"
 	"testing"
 	"time"
 
-	"github.com/harvester/vm-import-controller/pkg/server"
 	"github.com/ory/dockertest/v3"
 	"github.com/stretchr/testify/require"
 	"github.com/vmware/govmomi/vim25/mo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
+	"github.com/harvester/vm-import-controller/pkg/server"
 )
 
 var vcsimPort string
@@ -41,7 +42,9 @@ func TestMain(t *testing.M) {
 	vcsimPort = vcsimMock.GetPort("8989/tcp")
 	time.Sleep(30 * time.Second)
 	go func() {
-		server.NewServer(context.TODO())
+		if err = server.NewServer(context.TODO()); err != nil {
+			log.Fatalf("error creating server: %v", err)
+		}
 	}()
 
 	code := t.Run()
@@ -157,10 +160,10 @@ func Test_ExportVirtualMachine(t *testing.T) {
 
 	ctx := context.TODO()
 	assert := require.New(t)
-	govc_url := os.Getenv("GOVC_URL")
-	assert.NotEmpty(govc_url, "expected govc_url to be set")
-	govc_datacenter := os.Getenv("GOVC_DATACENTER")
-	assert.NotEmpty(govc_datacenter, "expected govc_datacenter to be set")
+	govcURL := os.Getenv("GOVC_URL")
+	assert.NotEmpty(govcURL, "expected govcURL to be set")
+	govcDatacenter := os.Getenv("GOVC_DATACENTER")
+	assert.NotEmpty(govcDatacenter, "expected govcDatacenter to be set")
 
 	data := make(map[string]string)
 	secret := &corev1.Secret{
@@ -170,19 +173,19 @@ func Test_ExportVirtualMachine(t *testing.T) {
 		},
 	}
 
-	govc_username := os.Getenv("GOVC_USERNAME")
-	assert.NotEmpty(govc_username, "expected govc_username to be set")
-	data["username"] = govc_username
+	govcUsername := os.Getenv("GOVC_USERNAME")
+	assert.NotEmpty(govcUsername, "expected govcUsername to be set")
+	data["username"] = govcUsername
 
-	govc_password := os.Getenv("GOVC_PASSWORD")
-	assert.NotEmpty(govc_password, "expected govc_password to be set")
-	data["password"] = govc_password
+	govcPassword := os.Getenv("GOVC_PASSWORD")
+	assert.NotEmpty(govcPassword, "expected govcPassword to be set")
+	data["password"] = govcPassword
 	secret.StringData = data
 
-	vm_name := os.Getenv("VM_NAME")
-	assert.NotEmpty(vm_name, "expected vm_name to be set")
+	vmName := os.Getenv("VM_NAME")
+	assert.NotEmpty(vmName, "expected vmName to be set")
 
-	c, err := NewClient(ctx, govc_url, govc_datacenter, secret)
+	c, err := NewClient(ctx, govcURL, govcDatacenter, secret)
 	assert.NoError(err, "expected no error during creation of client")
 	err = c.Verify()
 	assert.NoError(err, "expected no error during verification of client")
@@ -194,7 +197,7 @@ func Test_ExportVirtualMachine(t *testing.T) {
 		},
 		Spec: migration.VirtualMachineImportSpec{
 			SourceCluster:      corev1.ObjectReference{},
-			VirtualMachineName: vm_name,
+			VirtualMachineName: vmName,
 		},
 	}
 

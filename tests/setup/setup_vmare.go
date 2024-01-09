@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"os"
 
-	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 )
 
 const (
@@ -22,7 +23,8 @@ const (
 )
 
 var (
-	VmwareSourceNamespacedName, VmwareVMNamespacedName types.NamespacedName
+	VmwareSourceNamespacedName types.NamespacedName
+	VmwareVMNamespacedName     types.NamespacedName
 )
 
 type applyObject func(context.Context, client.Client) error
@@ -36,7 +38,7 @@ type applyObject func(context.Context, client.Client) error
 // SVC_ADDRESS: local machine address, used to generate the URL that Harvester downloads the exported images from
 // VM_NAME: name of VM to be exported
 // VM_FOLDER: folder where VM pointed to by VM_NAME is located
-func SetupVMware(ctx context.Context, k8sClient client.Client) error {
+func VMware(ctx context.Context, k8sClient client.Client) error {
 	VmwareSourceNamespacedName = types.NamespacedName{
 		Name:      sourceCluster,
 		Namespace: defaultNamespace,

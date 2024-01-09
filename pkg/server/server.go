@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -14,8 +15,7 @@ const defaultPort = 8080
 const tmpDir = "/tmp/vm-import-controller"
 
 func NewServer(ctx context.Context) error {
-	var err error
-	err = createTmpDir()
+	err := createTmpDir()
 	if err != nil {
 		return err
 	}
@@ -25,8 +25,11 @@ func NewServer(ctx context.Context) error {
 func newServer(ctx context.Context, path string) error {
 	defer os.RemoveAll(tmpDir)
 	srv := http.Server{
-		Addr:    fmt.Sprintf(":%d", defaultPort),
-		Handler: http.FileServer(http.Dir(path)),
+		Addr: fmt.Sprintf(":%d", defaultPort),
+		// fix G114: Use of net/http serve function that has no support for setting timeouts (gosec)
+		// refer to https://app.deepsource.com/directory/analyzers/go/issues/GO-S2114
+		ReadHeaderTimeout: 10 * time.Second,
+		Handler:           http.FileServer(http.Dir(path)),
 	}
 
 	eg, _ := errgroup.WithContext(ctx)
@@ -43,9 +46,11 @@ func newServer(ctx context.Context, path string) error {
 }
 
 func createTmpDir() error {
-	if _, err := os.Stat(tmpDir); os.IsNotExist(err) {
-		return os.Mkdir("/tmp/vm-import-controller", 0755)
-	} else {
+	_, err := os.Stat(tmpDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return os.Mkdir("/tmp/vm-import-controller", 0755)
+		}
 		return err
 	}
 	return nil

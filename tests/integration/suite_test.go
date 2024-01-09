@@ -6,15 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/harvester/vm-import-controller/pkg/server"
-
-	"github.com/harvester/vm-import-controller/tests/setup"
-
 	harvesterv1beta1 "github.com/harvester/harvester/pkg/apis/harvesterhci.io/v1beta1"
-	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
-	"github.com/harvester/vm-import-controller/pkg/controllers"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
 	"github.com/ory/dockertest/v3"
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
@@ -25,6 +19,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	log "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+
+	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
+	"github.com/harvester/vm-import-controller/pkg/controllers"
+	"github.com/harvester/vm-import-controller/pkg/server"
+	"github.com/harvester/vm-import-controller/tests/setup"
 )
 
 var (
@@ -39,6 +38,29 @@ var (
 	vcsimMock   *dockertest.Resource
 	useExisting bool
 )
+
+// Declarations for Ginkgo DSL
+var Fail = ginkgo.Fail
+var Describe = ginkgo.Describe
+var It = ginkgo.It
+var By = ginkgo.By
+var BeforeEach = ginkgo.BeforeEach
+var AfterEach = ginkgo.AfterEach
+var BeforeSuite = ginkgo.BeforeSuite
+var AfterSuite = ginkgo.AfterSuite
+var RunSpecs = ginkgo.RunSpecs
+var GinkgoWriter = ginkgo.GinkgoWriter
+var GinkgoRecover = ginkgo.GinkgoRecover
+var Skip = ginkgo.Skip
+
+// Declarations for Gomega Matchers
+var RegisterFailHandler = gomega.RegisterFailHandler
+var Equal = gomega.Equal
+var Expect = gomega.Expect
+var BeNil = gomega.BeNil
+var HaveOccurred = gomega.HaveOccurred
+var BeEmpty = gomega.BeEmpty
+var Eventually = gomega.Eventually
 
 func TestIntegration(t *testing.T) {
 	defer GinkgoRecover()
@@ -129,5 +151,6 @@ var _ = AfterSuite(func() {
 	}
 	egctx.Done()
 	cancel()
-	testEnv.Stop()
+	err := testEnv.Stop()
+	Expect(err).NotTo(HaveOccurred())
 })

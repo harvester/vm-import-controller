@@ -3,13 +3,15 @@ package setup
 import (
 	"context"
 	"fmt"
-	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
-	"github.com/harvester/vm-import-controller/pkg/source/openstack"
+	"os"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"os"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
+	"github.com/harvester/vm-import-controller/pkg/source/openstack"
 )
 
 const (
@@ -20,7 +22,8 @@ const (
 )
 
 var (
-	OpenstackSourceNamespacedName, OpenstackVMNamespacedName types.NamespacedName
+	OpenstackSourceNamespacedName types.NamespacedName
+	OpenstackVMNamespacedName     types.NamespacedName
 )
 
 // SetupOpenstack will try and setup a vmware migration based on GOVC environment variables
@@ -33,7 +36,7 @@ var (
 // OS_VM_NAME: name of VM to be exported
 // OS_REGION_NAME: OpenstackSource instance region to be used for testing
 // SVC_ADDRESS: Exposes the local host as SVC url when creating VirtualDiskImage endpoints to download images from
-func SetupOpenstack(ctx context.Context, k8sClient client.Client) error {
+func Openstack(ctx context.Context, k8sClient client.Client) error {
 	OpenstackSourceNamespacedName = types.NamespacedName{
 		Name:      openstackSourceCluster,
 		Namespace: defaultNamespace,

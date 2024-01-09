@@ -2,17 +2,18 @@ package openstack
 
 import (
 	"context"
-	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
-	"github.com/harvester/vm-import-controller/pkg/server"
-	"github.com/sirupsen/logrus"
-	"github.com/stretchr/testify/require"
 	"os"
 	"testing"
+
+	"github.com/sirupsen/logrus"
+	"github.com/stretchr/testify/require"
+
+	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
+	"github.com/harvester/vm-import-controller/pkg/server"
 )
 
 var (
-	c      *Client
-	testVM string
+	c *Client
 )
 
 func TestMain(t *testing.M) {
@@ -40,7 +41,9 @@ func TestMain(t *testing.M) {
 	}
 
 	go func() {
-		server.NewServer(context.TODO())
+		if err = server.NewServer(context.TODO()); err != nil {
+			logrus.Fatalf("error creating server: %v", err)
+		}
 	}()
 
 	if err != nil {

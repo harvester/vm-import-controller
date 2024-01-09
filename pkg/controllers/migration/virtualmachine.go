@@ -9,6 +9,10 @@ import (
 	"strings"
 	"time"
 
+	harvesterv1beta1 "github.com/harvester/harvester/pkg/apis/harvesterhci.io/v1beta1"
+	harvester "github.com/harvester/harvester/pkg/generated/controllers/harvesterhci.io/v1beta1"
+	kubevirtv1 "github.com/harvester/harvester/pkg/generated/controllers/kubevirt.io/v1"
+	"github.com/harvester/harvester/pkg/ref"
 	coreControllers "github.com/rancher/wrangler/pkg/generated/controllers/core/v1"
 	"github.com/rancher/wrangler/pkg/relatedresource"
 	"github.com/sirupsen/logrus"
@@ -21,10 +25,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 	kubevirt "kubevirt.io/api/core/v1"
 
-	harvesterv1beta1 "github.com/harvester/harvester/pkg/apis/harvesterhci.io/v1beta1"
-	harvester "github.com/harvester/harvester/pkg/generated/controllers/harvesterhci.io/v1beta1"
-	kubevirtv1 "github.com/harvester/harvester/pkg/generated/controllers/kubevirt.io/v1"
-	"github.com/harvester/harvester/pkg/ref"
 	"github.com/harvester/vm-import-controller/pkg/apis/common"
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	migrationController "github.com/harvester/vm-import-controller/pkg/generated/controllers/migration.harvesterhci.io/v1beta1"
@@ -82,7 +82,7 @@ func RegisterVMImportController(ctx context.Context, vmware migrationController.
 	importVM.OnChange(ctx, "virtualmachine-import-job-change", vmHandler.OnVirtualMachineChange)
 }
 
-func (h *virtualMachineHandler) OnVirtualMachineChange(key string, vmObj *migration.VirtualMachineImport) (*migration.VirtualMachineImport, error) {
+func (h *virtualMachineHandler) OnVirtualMachineChange(_ string, vmObj *migration.VirtualMachineImport) (*migration.VirtualMachineImport, error) {
 
 	if vmObj == nil || vmObj.DeletionTimestamp != nil {
 		return nil, nil
@@ -367,8 +367,8 @@ func (h *virtualMachineHandler) createVirtualMachine(vm *migration.VirtualMachin
 	}
 
 	// patch VM object with PVC info
-	var vmVols []kubevirt.Volume
-	var disks []kubevirt.Disk
+	vmVols := make([]kubevirt.Volume, 0, len(vm.Status.DiskImportStatus))
+	disks := make([]kubevirt.Disk, 0, len(vm.Status.DiskImportStatus))
 	for i, v := range vm.Status.DiskImportStatus {
 		pvcName := strings.ToLower(strings.Split(v.Name, ".img")[0])
 		vmVols = append(vmVols, kubevirt.Volume{
@@ -558,8 +558,7 @@ func generateAnnotations(vm *migration.VirtualMachineImport, vmi *harvesterv1bet
 	_ = annotationSchemaOwners.Add(kubevirt.VirtualMachineGroupVersionKind.GroupKind(), vm)
 	var schemaID = ref.GroupKindToSchemaID(kubevirt.VirtualMachineGroupVersionKind.GroupKind())
 	var ownerRef = ref.Construct(vm.GetNamespace(), vm.Spec.VirtualMachineName)
-	var schemaRef = annotationSchemaOwners[schemaID]
-	schemaRef = ref.AnnotationSchemaReference{SchemaID: schemaID, References: ref.NewAnnotationSchemaOwnerReferences()}
+	schemaRef := ref.AnnotationSchemaReference{SchemaID: schemaID, References: ref.NewAnnotationSchemaOwnerReferences()}
 	schemaRef.References.Insert(ownerRef)
 	annotationSchemaOwners[schemaID] = schemaRef
 	var ownersBytes, err = json.Marshal(annotationSchemaOwners)

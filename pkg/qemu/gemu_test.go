@@ -1,7 +1,6 @@
 package qemu
 
 import (
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,7 +10,7 @@ import (
 
 func Test_ConvertVMDKToRaw(t *testing.T) {
 	assert := require.New(t)
-	tmpDir, err := ioutil.TempDir("/tmp", "disk-test")
+	tmpDir, err := os.MkdirTemp("/tmp", "disk-test")
 	assert.NoError(err, "expected no error during creation of tmpDir")
 	defer os.RemoveAll(tmpDir)
 	tmpVMDK := filepath.Join(tmpDir, "vmdktest.vmdk")

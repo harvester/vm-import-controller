@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -21,17 +20,17 @@ func Test_NewServer(t *testing.T) {
 	assert.NoError(err, "expected no error during creation of tmp dir")
 	go func() {
 		err = newServer(ctx, tmpDir)
-		assert.Contains(err.Error(), "http: Server closed", "error occured during shutdown") //only expected error is context canceled
+		assert.Contains(err.Error(), "http: Server closed", "error occurred during shutdown") //only expected error is context canceled
 	}()
 	time.Sleep(1 * time.Second)
-	f, err := ioutil.TempFile(TempDir(), "sample")
+	f, err := os.MkdirTemp(TempDir(), "sample")
 	assert.NoError(err, "expect no error during creation of tmp file")
-	_, relative := filepath.Split(f.Name())
+	_, relative := filepath.Split(f)
 	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/%s", defaultPort, relative))
 	assert.NoError(err, "expect no error during http call")
 	assert.Equal(resp.StatusCode, 200, "expected http response code to be 200")
 	cancel()
 	time.Sleep(5 * time.Second)
-	_, err = os.Stat(f.Name())
+	_, err = os.Stat(f)
 	assert.True(os.IsNotExist(err), "expected no file to be found")
 }
