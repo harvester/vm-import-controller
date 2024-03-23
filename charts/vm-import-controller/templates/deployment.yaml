@@ -6,6 +6,8 @@ metadata:
     {{- include "vm-import-controller.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "vm-import-controller.selectorLabels" . | nindent 6 }}
