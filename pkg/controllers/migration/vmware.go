@@ -51,6 +51,13 @@ func (h *vmwareHandler) OnSourceChange(key string, v *migration.VmwareSource) (*
 
 		err = client.Verify()
 		if err != nil {
+			logrus.WithFields(logrus.Fields{
+				"apiVersion": v.APIVersion,
+				"kind":       v.Kind,
+				"name":       v.Name,
+				"namespace":  v.Namespace,
+				"err":        err,
+			}).Error("failed to verfiy client for vmware migration")
 			// unable to find specific datacenter
 			conds := []common.Condition{
 				{
