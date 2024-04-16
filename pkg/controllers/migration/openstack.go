@@ -53,6 +53,13 @@ func (h *openstackHandler) OnSourceChange(key string, o *migration.OpenstackSour
 
 		err = client.Verify()
 		if err != nil {
+			logrus.WithFields(logrus.Fields{
+				"apiVersion": o.APIVersion,
+				"kind":       o.Kind,
+				"name":       o.Name,
+				"namespace":  o.Namespace,
+				"err":        err,
+			}).Error("failed to verfiy client for openstack migration")
 			conds := []common.Condition{
 				{
 					Type:               migration.ClusterErrorCondition,
