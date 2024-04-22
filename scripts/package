@@ -7,5 +7,7 @@ cd $(dirname $0)/..
 IMAGE=${REPO}/harvester-vm-import-controller:${TAG}
 DOCKERFILE=package/Dockerfile
 
-docker build -f ${DOCKERFILE} -t ${IMAGE}  .
+buildx build --load \
+  -f ${DOCKERFILE} -t ${IMAGE} .
+
 echo Built ${IMAGE}

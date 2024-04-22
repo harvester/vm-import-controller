@@ -2,5 +2,6 @@
 set -e
 
 cd $(dirname $0)/..
-CGO_ENABLED=0 go build -o bin/vm-import-controller .
 mkdir -p bin
+GOARCH=amd64  CGO_ENABLED=0 go build -o bin/vm-import-controller-amd64 .
+GOARCH=arm64  CGO_ENABLED=0 go build -o bin/vm-import-controller-arm64 .
