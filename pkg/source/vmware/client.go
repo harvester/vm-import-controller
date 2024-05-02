@@ -152,17 +152,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 	}
 
 	u := lease.StartUpdater(c.ctx, info)
-	defer u.Done()
-	defer func() {
-		leaseErr := lease.Complete(c.ctx)
-		if leaseErr != nil {
-			if err == nil {
-				err = leaseErr
-			} else {
-				err = fmt.Errorf("err: %w, leaseErr: %v", err, leaseErr)
-			}
-		}
-	}()
+	defer os.RemoveAll(tmpPath)
 
 	for _, i := range info.Items {
 		// ignore iso and nvram disks
@@ -179,8 +169,18 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 			vm.Status.DiskImportStatus = append(vm.Status.DiskImportStatus, migration.DiskInfo{
 				Name:     i.Path,
 				DiskSize: i.Size,
+				BusType:  adapterType(i.DeviceId),
 			})
 		}
+	}
+
+	u.Done()
+	// complete lease since disks have been downloaded
+	// and all subsequence processing is local
+	// we ignore the error since we have the disks and can continue conversion
+	err = lease.Complete(c.ctx)
+	if err != nil {
+		logrus.Errorf("error marking lease complete: %v", err)
 	}
 
 	// disk info will name of disks including the format suffix ".vmdk"
@@ -199,14 +199,13 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 		destFile := filepath.Join(server.TempDir(), rawDiskName)
 		err = qemu.ConvertVMDKtoRAW(sourceFile, destFile)
 		if err != nil {
-			return err
+			return fmt.Errorf("error during conversion of vmdk to raw disk %v", err)
 		}
 		// update fields to reflect final location of raw image file
 		vm.Status.DiskImportStatus[i].DiskLocalPath = server.TempDir()
 		vm.Status.DiskImportStatus[i].Name = rawDiskName
 	}
-
-	return os.RemoveAll(tmpPath)
+	return nil
 }
 
 func (c *Client) PowerOffVirtualMachine(vm *migration.VirtualMachineImport) error {
@@ -247,6 +246,9 @@ func (c *Client) IsPoweredOff(vm *migration.VirtualMachineImport) (bool, error) 
 }
 
 func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*kubevirt.VirtualMachine, error) {
+	var boolFalse = false
+	var boolTrue = true
+
 	vmObj, err := c.findVM(vm.Spec.Folder, vm.Spec.VirtualMachineName)
 	if err != nil {
 		return nil, fmt.Errorf("error quering vm in GenerateVirtualMachine: %v", err)
@@ -290,6 +292,11 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 						Limits: corev1.ResourceList{
 							corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dM", o.Config.Hardware.MemoryMB)),
 							corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", o.Config.Hardware.NumCPU)),
+						},
+					},
+					Features: &kubevirt.Features{
+						ACPI: kubevirt.FeatureState{
+							Enabled: &boolTrue,
 						},
 					},
 				},
@@ -338,6 +345,27 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		})
 	}
 
+	// setup bios/efi, secureboot and tpm settings
+
+	if o.Config.Firmware == "efi" {
+		firmware := &kubevirt.Firmware{
+			Bootloader: &kubevirt.Bootloader{
+				EFI: &kubevirt.EFI{
+					SecureBoot: &boolFalse,
+				},
+			},
+		}
+		if *o.Config.BootOptions.EfiSecureBootEnabled {
+			firmware.Bootloader.EFI.SecureBoot = &boolTrue
+		}
+		vmSpec.Template.Spec.Domain.Firmware = firmware
+		if *o.Summary.Config.TpmPresent {
+			vmSpec.Template.Spec.Domain.Features.SMM = &kubevirt.FeatureState{
+				Enabled: &boolTrue,
+			}
+			vmSpec.Template.Spec.Domain.Devices.TPM = &kubevirt.TPMDevice{}
+		}
+	}
 	vmSpec.Template.Spec.Networks = networkConfig
 	vmSpec.Template.Spec.Domain.Devices.Interfaces = interfaces
 	newVM.Spec = vmSpec
@@ -413,4 +441,16 @@ func mapNetworkCards(networkCards []networkInfo, mapping []migration.NetworkMapp
 	}
 
 	return retNetwork
+}
+
+// adapterType tries to identify the disk bus type from vmware
+// to attempt and set correct bus types in kubevirt
+func adapterType(deviceID string) kubevirt.DiskBus {
+	if strings.Contains(deviceID, "AHCI") {
+		return kubevirt.DiskBusSATA
+	}
+	if strings.Contains(deviceID, "SCSI") {
+		return kubevirt.DiskBusSCSI
+	}
+	return kubevirt.DiskBusVirtio
 }

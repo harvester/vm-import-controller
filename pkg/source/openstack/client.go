@@ -38,6 +38,7 @@ const (
 	NotServerFound  = "noServerFound"
 	defaultInterval = 10 * time.Second
 	defaultCount    = 30
+	pollingTimeout  = 2 * 60 * 60 // in seconds
 )
 
 type Client struct {
@@ -47,6 +48,10 @@ type Client struct {
 	storageClient *gophercloud.ServiceClient
 	computeClient *gophercloud.ServiceClient
 	imageClient   *gophercloud.ServiceClient
+}
+
+type ExtendedVolume struct {
+	VolumeImageMetadata map[string]string `json:"volume_image_metadata,omitempty"`
 }
 
 // NewClient will generate a GopherCloud client
@@ -120,6 +125,7 @@ func NewClient(ctx context.Context, endpoint string, region string, secret *core
 	if err != nil {
 		return nil, fmt.Errorf("error generating image client: %v", err)
 	}
+
 	return &Client{
 		ctx:           ctx,
 		pClient:       client,
@@ -185,16 +191,8 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			return err
 		}
 
-		for i := 0; i < defaultCount; i++ {
-			snapObj, err := snapshots.Get(c.storageClient, snapInfo.ID).Extract()
-			if err != nil {
-				return err
-			}
-
-			if snapObj.Status == "available" {
-				break
-			}
-			time.Sleep(defaultInterval)
+		if err := snapshots.WaitForStatus(c.storageClient, snapInfo.ID, "available", pollingTimeout); err != nil {
+			return fmt.Errorf("timeout waiting for snapshot %v to become available: %v", snapInfo.ID, err)
 		}
 
 		volObj, err := volumes.Create(c.storageClient, volumes.CreateOpts{
@@ -207,15 +205,8 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 
 		logrus.Info(volObj)
 
-		for i := 0; i < defaultCount; i++ {
-			tmpVolObj, err := volumes.Get(c.storageClient, volObj.ID).Extract()
-			if err != nil {
-				return err
-			}
-			if tmpVolObj.Status == "available" {
-				break
-			}
-			time.Sleep(defaultInterval)
+		if err := volumes.WaitForStatus(c.storageClient, volObj.ID, "available", pollingTimeout); err != nil {
+			return fmt.Errorf("timeout waiting for volumes %v to become available: %v", volObj.ID, err)
 		}
 
 		logrus.Info("attempting to create new image from volume")
@@ -285,6 +276,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			Name:          fmt.Sprintf("%s-%d.img", vmObj.Name, i),
 			DiskSize:      int64(volObj.Size),
 			DiskLocalPath: server.TempDir(),
+			BusType:       kubevirt.DiskBusVirtio,
 		})
 	}
 	return os.RemoveAll(tmpDir)
@@ -325,6 +317,8 @@ func (c *Client) IsPoweredOff(vm *migration.VirtualMachineImport) (bool, error) 
 }
 
 func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*kubevirt.VirtualMachine, error) {
+	var boolFalse = false
+	var boolTrue = true
 	vmObj, err := c.findVM(vm.Spec.VirtualMachineName)
 	if err != nil {
 		return nil, fmt.Errorf("error finding vm in generatevirtualmachine: %v", err)
@@ -333,6 +327,11 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 	flavorObj, err := flavors.Get(c.computeClient, vmObj.Flavor["id"].(string)).Extract()
 	if err != nil {
 		return nil, fmt.Errorf("error looking up flavor: %v", err)
+	}
+
+	uefi, tpm, secureboot, err := c.ImageFirmwareSettings(vmObj)
+	if err != nil {
+		return nil, fmt.Errorf("error getting firware settings: %v", err)
 	}
 
 	var networks []networkInfo
@@ -427,6 +426,26 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 				Masquerade: &kubevirt.InterfaceMasquerade{},
 			},
 		})
+	}
+
+	if uefi {
+		firmware := &kubevirt.Firmware{
+			Bootloader: &kubevirt.Bootloader{
+				EFI: &kubevirt.EFI{
+					SecureBoot: &boolFalse,
+				},
+			},
+		}
+		if secureboot {
+			firmware.Bootloader.EFI.SecureBoot = &boolTrue
+		}
+		vmSpec.Template.Spec.Domain.Firmware = firmware
+		if tpm {
+			vmSpec.Template.Spec.Domain.Features.SMM = &kubevirt.FeatureState{
+				Enabled: &boolTrue,
+			}
+			vmSpec.Template.Spec.Domain.Devices.TPM = &kubevirt.TPMDevice{}
+		}
 	}
 
 	vmSpec.Template.Spec.Networks = networkConfig
@@ -528,11 +547,24 @@ func (c *Client) checkOrGetUUID(input string) (string, error) {
 		return "", fmt.Errorf("error extracting servers in checkorgetuuid:%v", err)
 	}
 
-	if len(allServers) > 1 {
-		return "", fmt.Errorf(NotUniqueName)
+	if len(allServers) == 0 {
+		return allServers[0].ID, nil
 	}
 
-	return allServers[0].ID, nil
+	// api could return multiple servers matching the pattern of name
+	// eg server names test and testvm will match name search "test"
+	// in which case we need to filter on actual name
+	var filteredServers []servers.Server
+	for _, v := range allServers {
+		if v.Name == input {
+			filteredServers = append(filteredServers, v)
+		}
+	}
+
+	if len(filteredServers) > 1 {
+		return "", fmt.Errorf(NotUniqueName)
+	}
+	return filteredServers[0].ID, nil
 }
 
 func (c *Client) findVM(name string) (*servers.Server, error) {
@@ -562,4 +594,42 @@ func mapNetworkCards(networkCards []networkInfo, mapping []migration.NetworkMapp
 	}
 
 	return retNetwork
+}
+
+func (c *Client) ImageFirmwareSettings(instance *servers.Server) (bool, bool, bool, error) {
+	var imageID string
+	var uefiType, tpmEnabled, secureBoot bool
+	for _, v := range instance.AttachedVolumes {
+		resp := volumes.Get(c.storageClient, v.ID)
+		var volInfo volumes.Volume
+		if err := resp.ExtractIntoStructPtr(&volInfo, "volume"); err != nil {
+			return uefiType, tpmEnabled, secureBoot, fmt.Errorf("error extracting volume info for volume %s: %v", v.ID, err)
+		}
+
+		if volInfo.Bootable == "true" {
+			var volStatus ExtendedVolume
+			if err := resp.ExtractIntoStructPtr(&volStatus, "volume"); err != nil {
+				return uefiType, tpmEnabled, secureBoot, fmt.Errorf("error extracting volume status for volume %s: %v", v.ID, err)
+			}
+			imageID = volStatus.VolumeImageMetadata["image_id"]
+		}
+	}
+
+	imageInfo, err := images.Get(c.imageClient, imageID).Extract()
+	if err != nil {
+		return uefiType, tpmEnabled, secureBoot, fmt.Errorf("error getting image details for image %s: %v", imageID, err)
+	}
+	firmwareType, ok := imageInfo.Properties["hw_firmware_type"]
+	if ok && firmwareType.(string) == "uefi" {
+		uefiType = true
+	}
+	logrus.Info(imageInfo.Properties)
+	if _, ok := imageInfo.Properties["hw_tpm_model"]; ok {
+		tpmEnabled = true
+	}
+
+	if val, ok := imageInfo.Properties["os_secure_boot"]; ok && (val == "required" || val == "optional") {
+		secureBoot = true
+	}
+	return uefiType, tpmEnabled, secureBoot, nil
 }
