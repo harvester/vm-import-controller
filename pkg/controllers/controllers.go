@@ -10,6 +10,7 @@ import (
 	"github.com/rancher/lasso/pkg/client"
 	"github.com/rancher/lasso/pkg/controller"
 	"github.com/rancher/wrangler/pkg/generated/controllers/core"
+	"github.com/rancher/wrangler/pkg/generated/controllers/storage"
 	"github.com/rancher/wrangler/pkg/start"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
@@ -46,10 +47,6 @@ func Register(ctx context.Context, restConfig *rest.Config) error {
 		DefaultWorkers:     5,
 	})
 
-	if err != nil {
-		return err
-	}
-
 	migrationFactory, err := migration.NewFactoryFromConfigWithOptions(restConfig, &migration.FactoryOptions{
 		SharedControllerFactory: scf,
 	})
@@ -74,10 +71,20 @@ func Register(ctx context.Context, restConfig *rest.Config) error {
 
 	kubevirtFactory, err := kubevirt.NewFactoryFromConfigWithOptions(restConfig, &kubevirt.FactoryOptions{
 		SharedControllerFactory: scf,
+		SharedCacheFactory:      cacheFactory,
 	})
 	if err != nil {
 		return err
 	}
+
+	storageFactory, err := storage.NewFactoryFromConfigWithOptions(restConfig, &core.FactoryOptions{
+		SharedControllerFactory: scf,
+	})
+	if err != nil {
+		return err
+	}
+
+	scCache := storageFactory.Storage().V1().StorageClass().Cache()
 
 	sc.RegisterVmareController(ctx, migrationFactory.Migration().V1beta1().VmwareSource(), coreFactory.Core().V1().Secret())
 	sc.RegisterOpenstackController(ctx, migrationFactory.Migration().V1beta1().OpenstackSource(), coreFactory.Core().V1().Secret())
@@ -85,7 +92,7 @@ func Register(ctx context.Context, restConfig *rest.Config) error {
 	sc.RegisterVMImportController(ctx, migrationFactory.Migration().V1beta1().VmwareSource(), migrationFactory.Migration().V1beta1().OpenstackSource(),
 		coreFactory.Core().V1().Secret(), migrationFactory.Migration().V1beta1().VirtualMachineImport(),
 		harvesterFactory.Harvesterhci().V1beta1().VirtualMachineImage(), kubevirtFactory.Kubevirt().V1().VirtualMachine(),
-		coreFactory.Core().V1().PersistentVolumeClaim())
+		coreFactory.Core().V1().PersistentVolumeClaim(), scCache)
 
-	return start.All(ctx, 1, migrationFactory)
+	return start.All(ctx, 1, migrationFactory, coreFactory, harvesterFactory, kubevirtFactory, storageFactory)
 }

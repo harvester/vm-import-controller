@@ -2,9 +2,11 @@ package main
 
 import (
 	"log"
+	"os"
 
 	harvesterv1beta1 "github.com/harvester/harvester/pkg/apis/harvesterhci.io/v1beta1"
 	"github.com/rancher/wrangler/pkg/signals"
+	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/clientcmd"
@@ -26,6 +28,10 @@ func init() {
 	}
 	if err = kubevirtv1.AddToScheme(scheme); err != nil {
 		log.Fatalf("failed to add kubevirtv1 scheme, %v", err)
+	}
+	debug := os.Getenv("DEBUG")
+	if debug == "true" || debug == "TRUE" {
+		logrus.SetLevel(logrus.DebugLevel)
 	}
 
 }
