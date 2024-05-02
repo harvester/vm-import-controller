@@ -51,8 +51,6 @@ func GenerateKubeVirtCRD() ([]*extv1.CustomResourceDefinition, error) {
 		components.NewVirtualMachineSnapshotCrd,
 		components.NewVirtualMachineSnapshotContentCrd,
 		components.NewVirtualMachineRestoreCrd,
-		components.NewVirtualMachineFlavorCrd,
-		components.NewVirtualMachineClusterFlavorCrd,
 		components.NewMigrationPolicyCrd,
 	}
 

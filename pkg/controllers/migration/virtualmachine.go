@@ -9,6 +9,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/harvester/vm-import-controller/pkg/apis/common"
+	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
+	migrationController "github.com/harvester/vm-import-controller/pkg/generated/controllers/migration.harvesterhci.io/v1beta1"
+	"github.com/harvester/vm-import-controller/pkg/server"
+	"github.com/harvester/vm-import-controller/pkg/source/openstack"
+	"github.com/harvester/vm-import-controller/pkg/source/vmware"
+	"github.com/harvester/vm-import-controller/pkg/util"
+
 	harvesterv1beta1 "github.com/harvester/harvester/pkg/apis/harvesterhci.io/v1beta1"
 	harvester "github.com/harvester/harvester/pkg/generated/controllers/harvesterhci.io/v1beta1"
 	kubevirtv1 "github.com/harvester/harvester/pkg/generated/controllers/kubevirt.io/v1"
@@ -25,13 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 	kubevirt "kubevirt.io/api/core/v1"
 
-	"github.com/harvester/vm-import-controller/pkg/apis/common"
-	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
-	migrationController "github.com/harvester/vm-import-controller/pkg/generated/controllers/migration.harvesterhci.io/v1beta1"
-	"github.com/harvester/vm-import-controller/pkg/server"
-	"github.com/harvester/vm-import-controller/pkg/source/openstack"
-	"github.com/harvester/vm-import-controller/pkg/source/vmware"
-	"github.com/harvester/vm-import-controller/pkg/util"
+	storageControllers "github.com/rancher/wrangler/pkg/generated/controllers/storage/v1"
 )
 
 const (
@@ -62,10 +64,11 @@ type virtualMachineHandler struct {
 	vmi       harvester.VirtualMachineImageController
 	kubevirt  kubevirtv1.VirtualMachineController
 	pvc       coreControllers.PersistentVolumeClaimController
+	sc        storageControllers.StorageClassCache
 }
 
 func RegisterVMImportController(ctx context.Context, vmware migrationController.VmwareSourceController, openstack migrationController.OpenstackSourceController,
-	secret coreControllers.SecretController, importVM migrationController.VirtualMachineImportController, vmi harvester.VirtualMachineImageController, kubevirt kubevirtv1.VirtualMachineController, pvc coreControllers.PersistentVolumeClaimController) {
+	secret coreControllers.SecretController, importVM migrationController.VirtualMachineImportController, vmi harvester.VirtualMachineImageController, kubevirt kubevirtv1.VirtualMachineController, pvc coreControllers.PersistentVolumeClaimController, scCache storageControllers.StorageClassCache) {
 
 	vmHandler := &virtualMachineHandler{
 		ctx:       ctx,
@@ -76,6 +79,7 @@ func RegisterVMImportController(ctx context.Context, vmware migrationController.
 		vmi:       vmi,
 		kubevirt:  kubevirt,
 		pvc:       pvc,
+		sc:        scCache,
 	}
 
 	relatedresource.Watch(ctx, "virtualmachineimage-change", vmHandler.ReconcileVMI, importVM, vmi)
@@ -128,6 +132,9 @@ func (h *virtualMachineHandler) OnVirtualMachineChange(_ string, vmObj *migratio
 	case migration.VirtualMachineInvalid:
 		logrus.Infof("vm %s in namespace %v has an invalid spec", vm.Name, vm.Namespace)
 		return vm, nil
+	case migration.VirtualMachineMigrationFailed:
+		logrus.Infof("vm migration failed for %s in namespace %s", vm.Name, vm.Namespace)
+		return vm, nil
 	}
 
 	return vm, nil
@@ -159,6 +166,15 @@ func (h *virtualMachineHandler) preFlightChecks(vm *migration.VirtualMachineImpo
 
 	if ss.ClusterStatus() != migration.ClusterReady {
 		return fmt.Errorf("migration not yet ready. current status is %s", ss.ClusterStatus())
+	}
+
+	// verify specified storage class exists. Empty storage class means default storage class
+	if vm.Spec.StorageClass != "" {
+		_, err := h.sc.Get(vm.Spec.StorageClass)
+		if err != nil {
+			logrus.Errorf("error looking up storageclass %s: %v", vm.Spec.StorageClass, err)
+			return err
+		}
 	}
 
 	return nil
@@ -214,10 +230,23 @@ func (h *virtualMachineHandler) triggerExport(vm *migration.VirtualMachineImport
 
 	if util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweredOff, v1.ConditionTrue) &&
 		util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweringOff, v1.ConditionTrue) &&
-		!util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineExported, v1.ConditionTrue) {
+		!util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineExported, v1.ConditionTrue) &&
+		!util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineExportFailed, v1.ConditionTrue) {
 		err := vmo.ExportVirtualMachine(vm)
 		if err != nil {
-			return fmt.Errorf("error exporting virtual machine: %v", err)
+			// avoid retrying if vm export fails
+			conds := []common.Condition{
+				{
+					Type:               migration.VirtualMachineExportFailed,
+					Status:             v1.ConditionTrue,
+					LastUpdateTime:     metav1.Now().Format(time.RFC3339),
+					LastTransitionTime: metav1.Now().Format(time.RFC3339),
+					Message:            fmt.Sprintf("error exporting VM: %v", err),
+				},
+			}
+			vm.Status.ImportConditions = util.MergeConditions(vm.Status.ImportConditions, conds)
+			logrus.Errorf("error exporting virtualmachine %s for virtualmachineimport %s-%s: %v", vm.Spec.VirtualMachineName, vm.Namespace, vm.Name, err)
+			return nil
 		}
 		conds := []common.Condition{
 			{
@@ -388,7 +417,7 @@ func (h *virtualMachineHandler) createVirtualMachine(vm *migration.VirtualMachin
 			BootOrder: &[]uint{uint(diskOrder)}[0],
 			DiskDevice: kubevirt.DiskDevice{
 				Disk: &kubevirt.DiskTarget{
-					Bus: "virtio",
+					Bus: v.BusType,
 				},
 			},
 		})
@@ -612,5 +641,13 @@ func (h *virtualMachineHandler) checkAndCreateVirtualMachineImage(vm *migration.
 			SourceType:  "download",
 		},
 	}
+
+	if vm.Spec.StorageClass != "" {
+		// update storage class annotations
+		vmi.Annotations = map[string]string{
+			"harvesterhci.io/storageClassName": vm.Spec.StorageClass,
+		}
+	}
+
 	return h.vmi.Create(vmi)
 }
