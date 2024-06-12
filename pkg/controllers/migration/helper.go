@@ -117,6 +117,11 @@ func (h *virtualMachineHandler) runVirtualMachineExport(vm *migration.VirtualMac
 	if util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineExported, v1.ConditionTrue) {
 		vm.Status.Status = migration.DisksExported
 	}
+
+	if util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineExportFailed, v1.ConditionTrue) {
+		vm.Status.Status = migration.VirtualMachineMigrationFailed
+	}
+
 	return h.importVM.UpdateStatus(vm)
 }
 

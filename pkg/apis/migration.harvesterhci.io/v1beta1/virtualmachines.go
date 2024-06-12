@@ -4,6 +4,7 @@ import (
 	"github.com/rancher/wrangler/pkg/condition"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	"github.com/harvester/vm-import-controller/pkg/apis/common"
 )
@@ -24,6 +25,7 @@ type VirtualMachineImportSpec struct {
 	VirtualMachineName string                 `json:"virtualMachineName"`
 	Folder             string                 `json:"folder,omitempty"`
 	Mapping            []NetworkMapping       `json:"networkMapping,omitempty"` //If empty new VirtualMachineImport will be mapped to Management Network
+	StorageClass       string                 `json:"storageClass,omitempty"`
 }
 
 // VirtualMachineImportStatus tracks the status of the VirtualMachineImport export from migration and import into the Harvester cluster
@@ -50,6 +52,7 @@ type DiskInfo struct {
 	DiskRoute           string             `json:"diskRoute,omitempty"`
 	VirtualMachineImage string             `json:"VirtualMachineImage,omitempty"`
 	DiskConditions      []common.Condition `json:"diskConditions,omitempty"`
+	BusType             kubevirtv1.DiskBus `json:"busType" default:"virtio"`
 }
 
 type NetworkMapping struct {
@@ -60,19 +63,21 @@ type NetworkMapping struct {
 type ImportStatus string
 
 const (
-	SourceReady                  ImportStatus   = "sourceReady"
-	DisksExported                ImportStatus   = "disksExported"
-	DiskImagesSubmitted          ImportStatus   = "diskImageSubmitted"
-	DiskImagesReady              ImportStatus   = "diskImagesReady"
-	DiskImagesFailed             ImportStatus   = "diskImageFailed"
-	VirtualMachineCreated        ImportStatus   = "virtualMachineCreated"
-	VirtualMachineRunning        ImportStatus   = "virtualMachineRunning"
-	VirtualMachineInvalid        ImportStatus   = "virtualMachineInvalid"
-	VirtualMachinePoweringOff    condition.Cond = "VMPoweringOff"
-	VirtualMachinePoweredOff     condition.Cond = "VMPoweredOff"
-	VirtualMachineExported       condition.Cond = "VMExported"
-	VirtualMachineImageSubmitted condition.Cond = "VirtualMachineImageSubmitted"
-	VirtualMachineImageReady     condition.Cond = "VirtualMachineImageReady"
-	VirtualMachineImageFailed    condition.Cond = "VirtualMachineImageFailed"
-	NotValidDNS1123Label         string         = "not a valid DNS1123 label"
+	SourceReady                   ImportStatus   = "sourceReady"
+	DisksExported                 ImportStatus   = "disksExported"
+	DiskImagesSubmitted           ImportStatus   = "diskImageSubmitted"
+	DiskImagesReady               ImportStatus   = "diskImagesReady"
+	DiskImagesFailed              ImportStatus   = "diskImageFailed"
+	VirtualMachineCreated         ImportStatus   = "virtualMachineCreated"
+	VirtualMachineRunning         ImportStatus   = "virtualMachineRunning"
+	VirtualMachineInvalid         ImportStatus   = "virtualMachineInvalid"
+	VirtualMachinePoweringOff     condition.Cond = "VMPoweringOff"
+	VirtualMachinePoweredOff      condition.Cond = "VMPoweredOff"
+	VirtualMachineExported        condition.Cond = "VMExported"
+	VirtualMachineImageSubmitted  condition.Cond = "VirtualMachineImageSubmitted"
+	VirtualMachineImageReady      condition.Cond = "VirtualMachineImageReady"
+	VirtualMachineImageFailed     condition.Cond = "VirtualMachineImageFailed"
+	NotValidDNS1123Label          string         = "not a valid DNS1123 label"
+	VirtualMachineExportFailed    condition.Cond = "VMExportFailed"
+	VirtualMachineMigrationFailed ImportStatus   = "VMMigrationFailed"
 )
