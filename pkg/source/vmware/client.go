@@ -357,12 +357,13 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		}
 		if *o.Config.BootOptions.EfiSecureBootEnabled {
 			firmware.Bootloader.EFI.SecureBoot = &boolTrue
-		}
-		vmSpec.Template.Spec.Domain.Firmware = firmware
-		if *o.Summary.Config.TpmPresent {
 			vmSpec.Template.Spec.Domain.Features.SMM = &kubevirt.FeatureState{
 				Enabled: &boolTrue,
 			}
+		}
+		vmSpec.Template.Spec.Domain.Firmware = firmware
+		if *o.Summary.Config.TpmPresent {
+
 			vmSpec.Template.Spec.Domain.Devices.TPM = &kubevirt.TPMDevice{}
 		}
 	}
@@ -445,12 +446,10 @@ func mapNetworkCards(networkCards []networkInfo, mapping []migration.NetworkMapp
 
 // adapterType tries to identify the disk bus type from vmware
 // to attempt and set correct bus types in kubevirt
+// default is to switch to SATA to ensure device boots
 func adapterType(deviceID string) kubevirt.DiskBus {
-	if strings.Contains(deviceID, "AHCI") {
-		return kubevirt.DiskBusSATA
-	}
 	if strings.Contains(deviceID, "SCSI") {
 		return kubevirt.DiskBusSCSI
 	}
-	return kubevirt.DiskBusVirtio
+	return kubevirt.DiskBusSATA
 }
