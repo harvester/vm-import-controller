@@ -86,7 +86,7 @@ func Register(ctx context.Context, restConfig *rest.Config) error {
 
 	scCache := storageFactory.Storage().V1().StorageClass().Cache()
 
-	sc.RegisterVmareController(ctx, migrationFactory.Migration().V1beta1().VmwareSource(), coreFactory.Core().V1().Secret())
+	sc.RegisterVmwareController(ctx, migrationFactory.Migration().V1beta1().VmwareSource(), coreFactory.Core().V1().Secret())
 	sc.RegisterOpenstackController(ctx, migrationFactory.Migration().V1beta1().OpenstackSource(), coreFactory.Core().V1().Secret())
 
 	sc.RegisterVMImportController(ctx, migrationFactory.Migration().V1beta1().VmwareSource(), migrationFactory.Migration().V1beta1().OpenstackSource(),
