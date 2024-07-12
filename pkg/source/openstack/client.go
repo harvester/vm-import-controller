@@ -547,10 +547,6 @@ func (c *Client) checkOrGetUUID(input string) (string, error) {
 		return "", fmt.Errorf("error extracting servers in checkorgetuuid:%v", err)
 	}
 
-	if len(allServers) == 0 {
-		return allServers[0].ID, nil
-	}
-
 	// api could return multiple servers matching the pattern of name
 	// eg server names test and testvm will match name search "test"
 	// in which case we need to filter on actual name
@@ -623,7 +619,7 @@ func (c *Client) ImageFirmwareSettings(instance *servers.Server) (bool, bool, bo
 	if ok && firmwareType.(string) == "uefi" {
 		uefiType = true
 	}
-	logrus.Info(imageInfo.Properties)
+	logrus.Debugf("found image firmware settings %v", imageInfo.Properties)
 	if _, ok := imageInfo.Properties["hw_tpm_model"]; ok {
 		tpmEnabled = true
 	}
