@@ -37,7 +37,7 @@ import (
 )
 
 const (
-	vmiAnnotation    = "migaration.harvesterhci.io/virtualmachineimport"
+	vmiAnnotation    = "migration.harvesterhci.io/virtualmachineimport"
 	imageDisplayName = "harvesterhci.io/imageDisplayName"
 )
 

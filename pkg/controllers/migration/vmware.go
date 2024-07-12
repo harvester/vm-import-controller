@@ -23,7 +23,7 @@ type vmwareHandler struct {
 	secret corecontrollers.SecretController
 }
 
-func RegisterVmareController(ctx context.Context, vc migrationController.VmwareSourceController, secret corecontrollers.SecretController) {
+func RegisterVmwareController(ctx context.Context, vc migrationController.VmwareSourceController, secret corecontrollers.SecretController) {
 	vHandler := &vmwareHandler{
 		ctx:    ctx,
 		vmware: vc,
