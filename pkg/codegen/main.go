@@ -20,7 +20,8 @@ func main() {
 				Types: []interface{}{
 					"./pkg/apis/migration.harvesterhci.io/v1beta1",
 				},
-				GenerateTypes: true,
+				GenerateTypes:   true,
+				GenerateClients: true,
 			},
 		},
 	})
