@@ -382,6 +382,11 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 							corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", flavorObj.VCPUs)),
 						},
 					},
+					Features: &kubevirt.Features{
+						ACPI: kubevirt.FeatureState{
+							Enabled: &boolTrue,
+						},
+					},
 				},
 			},
 		},
@@ -438,6 +443,9 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		}
 		if secureboot {
 			firmware.Bootloader.EFI.SecureBoot = &boolTrue
+			vmSpec.Template.Spec.Domain.Features.SMM = &kubevirt.FeatureState{
+				Enabled: &boolTrue,
+			}
 		}
 		vmSpec.Template.Spec.Domain.Firmware = firmware
 		if tpm {
