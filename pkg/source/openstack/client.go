@@ -34,11 +34,12 @@ import (
 )
 
 const (
-	NotUniqueName   = "notUniqueName"
-	NotServerFound  = "noServerFound"
-	defaultInterval = 10 * time.Second
-	defaultCount    = 30
-	pollingTimeout  = 2 * 60 * 60 // in seconds
+	NotUniqueName         = "notUniqueName"
+	NotServerFound        = "noServerFound"
+	defaultInterval       = 10 * time.Second
+	defaultCount          = 30
+	pollingTimeout        = 2 * 60 * 60 // in seconds
+	annotationDescription = "field.cattle.io/description"
 )
 
 type Client struct {
@@ -52,6 +53,15 @@ type Client struct {
 
 type ExtendedVolume struct {
 	VolumeImageMetadata map[string]string `json:"volume_image_metadata,omitempty"`
+}
+
+// ExtendedServer The original `Server` structure does not contain the `Description` field.
+// References:
+// - https://github.com/gophercloud/gophercloud/pull/1505
+// - https://docs.openstack.org/api-ref/compute/?expanded=list-all-metadata-detail%2Ccreate-server-detail#show-server-details
+type ExtendedServer struct {
+	servers.Server
+	Description string `json:"description,omitempty"`
 }
 
 // NewClient will generate a GopherCloud client
@@ -332,7 +342,7 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		return nil, fmt.Errorf("error looking up flavor: %v", err)
 	}
 
-	uefi, tpm, secureboot, err := c.ImageFirmwareSettings(vmObj)
+	uefi, tpm, secureboot, err := c.ImageFirmwareSettings(&vmObj.Server)
 	if err != nil {
 		return nil, fmt.Errorf("error getting firware settings: %v", err)
 	}
@@ -347,6 +357,13 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 			Name:      vm.Spec.VirtualMachineName,
 			Namespace: vm.Namespace,
 		},
+	}
+
+	if vmObj.Description != "" {
+		if newVM.GetAnnotations() == nil {
+			newVM.Annotations = make(map[string]string)
+		}
+		newVM.ObjectMeta.Annotations[annotationDescription] = vmObj.Description
 	}
 
 	vmSpec := kubevirt.VirtualMachineSpec{
@@ -562,13 +579,15 @@ func (c *Client) checkOrGetUUID(input string) (string, error) {
 	return filteredServers[0].ID, nil
 }
 
-func (c *Client) findVM(name string) (*servers.Server, error) {
+func (c *Client) findVM(name string) (*ExtendedServer, error) {
 	parsedUUID, err := c.checkOrGetUUID(name)
 	if err != nil {
 		return nil, err
 	}
-	return servers.Get(c.computeClient, parsedUUID).Extract()
-
+	sr := servers.Get(c.computeClient, parsedUUID)
+	var s ExtendedServer
+	err = sr.ExtractInto(&s)
+	return &s, err
 }
 
 type networkInfo struct {
