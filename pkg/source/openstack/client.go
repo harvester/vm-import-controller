@@ -203,13 +203,16 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			return err
 		}
 
-		logrus.Info(volObj)
+		logrus.WithFields(logrus.Fields{
+			"name":                    vm.Name,
+			"namespace":               vm.Namespace,
+			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+			"volume":                  volObj,
+		}).Info("Attempting to create new image from volume")
 
 		if err := volumes.WaitForStatus(c.storageClient, volObj.ID, "available", pollingTimeout); err != nil {
 			return fmt.Errorf("timeout waiting for volumes %v to become available: %v", volObj.ID, err)
 		}
-
-		logrus.Info("attempting to create new image from volume")
 
 		volImage, err := volumeactions.UploadImage(c.storageClient, volObj.ID, volumeactions.UploadImageOpts{
 			ImageName:  fmt.Sprintf("import-controller-%s-%d", vm.Spec.VirtualMachineName, i),
