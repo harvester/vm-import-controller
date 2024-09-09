@@ -78,11 +78,11 @@ var _ = Describe("perform valid dns names", func() {
 					return err
 				}
 
-				if vmObj.Status.Status == migration.VirtualMachineInvalid {
+				if vmObj.Status.Status == migration.VirtualMachineImportInvalid {
 					return nil
 				}
 
-				return fmt.Errorf("waiiting for vm obj to be marked invalid")
+				return fmt.Errorf("waiting for vm obj to be marked invalid")
 			}, "30s", "5s").ShouldNot(HaveOccurred())
 		})
 	})
