@@ -21,11 +21,18 @@ type VirtualMachineImport struct {
 
 // VirtualMachineImportSpec is used to create kubevirt VirtualMachines by exporting VM's from migration clusters.
 type VirtualMachineImportSpec struct {
-	SourceCluster      corev1.ObjectReference `json:"sourceCluster"`
-	VirtualMachineName string                 `json:"virtualMachineName"`
-	Folder             string                 `json:"folder,omitempty"`
-	Mapping            []NetworkMapping       `json:"networkMapping,omitempty"` //If empty new VirtualMachineImport will be mapped to Management Network
-	StorageClass       string                 `json:"storageClass,omitempty"`
+	SourceCluster corev1.ObjectReference `json:"sourceCluster"`
+
+	// VirtualMachineName is the name of the virtual machine that will be
+	// imported. It contains the name or ID of the source virtual machine.
+	// Note that these names may not be DNS1123 compliant and will therefore
+	// be sanitized later.
+	// Examples: "vm-1234", "my-VM" or "5649cac7-3871-4bb5-aab6-c72b8c18d0a2"
+	VirtualMachineName string `json:"virtualMachineName"`
+
+	Folder       string           `json:"folder,omitempty"`
+	Mapping      []NetworkMapping `json:"networkMapping,omitempty"` //If empty new VirtualMachineImport will be mapped to Management Network
+	StorageClass string           `json:"storageClass,omitempty"`
 }
 
 // VirtualMachineImportStatus tracks the status of the VirtualMachineImport export from migration and import into the Harvester cluster
@@ -34,6 +41,11 @@ type VirtualMachineImportStatus struct {
 	DiskImportStatus  []DiskInfo         `json:"diskImportStatus,omitempty"`
 	ImportConditions  []common.Condition `json:"importConditions,omitempty"`
 	NewVirtualMachine string             `json:"newVirtualMachine,omitempty"`
+
+	// ImportedVirtualMachineName is the sanitized and definite name of the
+	// target virtual machine that will be created in the Harvester cluster.
+	// The name is DNS1123 compliant.
+	ImportedVirtualMachineName string `json:"importedVirtualMachineName,omitempty"`
 }
 
 // DiskInfo contains the information about associated Disk in the Import migration.
@@ -70,14 +82,14 @@ const (
 	DiskImagesFailed              ImportStatus   = "diskImageFailed"
 	VirtualMachineCreated         ImportStatus   = "virtualMachineCreated"
 	VirtualMachineRunning         ImportStatus   = "virtualMachineRunning"
-	VirtualMachineInvalid         ImportStatus   = "virtualMachineInvalid"
+	VirtualMachineImportValid     ImportStatus   = "virtualMachineImportValid"
+	VirtualMachineImportInvalid   ImportStatus   = "virtualMachineImportInvalid"
 	VirtualMachinePoweringOff     condition.Cond = "VMPoweringOff"
 	VirtualMachinePoweredOff      condition.Cond = "VMPoweredOff"
 	VirtualMachineExported        condition.Cond = "VMExported"
 	VirtualMachineImageSubmitted  condition.Cond = "VirtualMachineImageSubmitted"
 	VirtualMachineImageReady      condition.Cond = "VirtualMachineImageReady"
 	VirtualMachineImageFailed     condition.Cond = "VirtualMachineImageFailed"
-	NotValidDNS1123Label          string         = "not a valid DNS1123 label"
 	VirtualMachineExportFailed    condition.Cond = "VMExportFailed"
 	VirtualMachineMigrationFailed ImportStatus   = "VMMigrationFailed"
 )
