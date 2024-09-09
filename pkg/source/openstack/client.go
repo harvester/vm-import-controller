@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -245,6 +246,15 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			return fmt.Errorf("timeout waiting for volume %s to be available: %v", volObj.ID, err)
 		}
 
+		logrus.WithFields(logrus.Fields{
+			"name":                    vm.Name,
+			"namespace":               vm.Namespace,
+			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+			"spec.sourceCluster.name": vm.Spec.SourceCluster.Name,
+			"spec.sourceCluster.kind": vm.Spec.SourceCluster.Kind,
+			"attachedVolumeID":        v.ID,
+		}).Info("Creating a new image from a volume")
+
 		volImage, err := volumeactions.UploadImage(c.storageClient, volObj.ID, volumeactions.UploadImageOpts{
 			ImageName:  imageName,
 			DiskFormat: "raw",
@@ -271,6 +281,15 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			}).Info("Waiting for raw image to be available")
 			time.Sleep(time.Duration(c.options.UploadImageRetryDelay) * time.Second)
 		}
+
+		logrus.WithFields(logrus.Fields{
+			"name":                    vm.Name,
+			"namespace":               vm.Namespace,
+			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+			"spec.sourceCluster.name": vm.Spec.SourceCluster.Name,
+			"spec.sourceCluster.kind": vm.Spec.SourceCluster.Kind,
+			"imageID":                 volImage.ImageID,
+		}).Info("Downloading an image")
 
 		contents, err := imagedata.Download(c.imageClient, volImage.ImageID).Extract()
 		if err != nil {
@@ -318,7 +337,7 @@ func (c *Client) PowerOffVirtualMachine(vm *migration.VirtualMachineImport) erro
 	if err != nil {
 		return fmt.Errorf("error generating compute client during poweroffvirtualmachine: %v", err)
 	}
-	uuid, err := c.checkOrGetUUID(vm.Spec.VirtualMachineName)
+	serverUUID, err := c.checkOrGetUUID(vm.Spec.VirtualMachineName)
 	if err != nil {
 		return err
 	}
@@ -328,13 +347,12 @@ func (c *Client) PowerOffVirtualMachine(vm *migration.VirtualMachineImport) erro
 		return err
 	}
 	if !ok {
-		return startstop.Stop(computeClient, uuid).ExtractErr()
+		return startstop.Stop(computeClient, serverUUID).ExtractErr()
 	}
 	return nil
 }
 
 func (c *Client) IsPoweredOff(vm *migration.VirtualMachineImport) (bool, error) {
-
 	s, err := c.findVM(vm.Spec.VirtualMachineName)
 	if err != nil {
 		return false, err
@@ -372,7 +390,7 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 
 	newVM := &kubevirt.VirtualMachine{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      vm.Spec.VirtualMachineName,
+			Name:      vm.Status.DefiniteVirtualMachineName,
 			Namespace: vm.Namespace,
 		},
 	}
@@ -389,7 +407,7 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		Template: &kubevirt.VirtualMachineInstanceTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					"harvesterhci.io/vmName": vm.Spec.VirtualMachineName,
+					"harvesterhci.io/vmName": vm.Status.DefiniteVirtualMachineName,
 				},
 			},
 			Spec: kubevirt.VirtualMachineInstanceSpec{
@@ -696,6 +714,28 @@ func generateNetworkInfo(info map[string]interface{}) ([]networkInfo, error) {
 		uniqueNetworks = append(uniqueNetworks, v)
 	}
 	return uniqueNetworks, nil
+}
+
+// SanitizeVirtualMachineImport is used to sanitize the VirtualMachineImport object.
+func (c *Client) SanitizeVirtualMachineImport(vm *migration.VirtualMachineImport) error {
+	// If the given `spec.virtualMachineName` is a UUID, then we need to
+	// get the name from the OpenStack server object.
+	parsedUUID, err := uuid.Parse(vm.Spec.VirtualMachineName)
+	if err == nil {
+		vmObj, err := c.findVM(parsedUUID.String())
+		if err != nil {
+			return err
+		}
+		vm.Status.DefiniteVirtualMachineName = vmObj.Name
+	} else {
+		vm.Status.DefiniteVirtualMachineName = vm.Spec.VirtualMachineName
+	}
+
+	// Note, server objects might have upper case characters in OpenStack,
+	// so we need to convert them to lower case to be RFC 1123 compliant.
+	vm.Status.DefiniteVirtualMachineName = strings.ToLower(vm.Status.DefiniteVirtualMachineName)
+
+	return nil
 }
 
 // writeRawImageFile Download and write the raw image file to the specified path in chunks of 32KiB.

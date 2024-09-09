@@ -38,11 +38,15 @@ import (
 )
 
 const (
-	vmiAnnotation    = "migration.harvesterhci.io/virtualmachineimport"
-	imageDisplayName = "harvesterhci.io/imageDisplayName"
+	annotationVirtualMachineImport = "migration.harvesterhci.io/virtualmachineimport"
+	labelImageDisplayName          = "harvesterhci.io/imageDisplayName"
+	expectedAPIVersion             = "migration.harvesterhci.io/v1beta1"
 )
 
 type VirtualMachineOperations interface {
+	// SanitizeVirtualMachineImport is responsible for sanitizing the VirtualMachineImport object.
+	SanitizeVirtualMachineImport(vm *migration.VirtualMachineImport) error
+
 	// ExportVirtualMachine is responsible for generating the raw images for each disk associated with the VirtualMachineImport
 	// Any image format conversion will be performed by the VM Operation
 	ExportVirtualMachine(vm *migration.VirtualMachineImport) error
@@ -93,12 +97,12 @@ func RegisterVMImportController(ctx context.Context, vmware migrationController.
 }
 
 func (h *virtualMachineHandler) OnVirtualMachineChange(_ string, vmObj *migration.VirtualMachineImport) (*migration.VirtualMachineImport, error) {
-
 	if vmObj == nil || vmObj.DeletionTimestamp != nil {
 		return nil, nil
 	}
 
 	vm := vmObj.DeepCopy()
+
 	switch vm.Status.Status {
 	case "":
 		// run preflight checks and make vm ready for import
@@ -108,6 +112,13 @@ func (h *virtualMachineHandler) OnVirtualMachineChange(_ string, vmObj *migratio
 			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
 		}).Info("Running preflight checks ...")
 		return h.reconcilePreFlightChecks(vm)
+	case migration.VirtualMachineImportValid:
+		logrus.WithFields(logrus.Fields{
+			"name":                    vm.Name,
+			"namespace":               vm.Namespace,
+			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+		}).Info("Sanitizing the import spec ...")
+		return h.sanitizeVirtualMachineImport(vm)
 	case migration.SourceReady:
 		// vm migration is valid and ready. trigger migration specific import
 		logrus.WithFields(logrus.Fields{
@@ -139,7 +150,9 @@ func (h *virtualMachineHandler) OnVirtualMachineChange(_ string, vmObj *migratio
 		if newStatus == nil {
 			return vm, nil
 		}
+
 		vm.Status.Status = *newStatus
+
 		return h.importVM.UpdateStatus(vm)
 	case migration.DiskImagesFailed:
 		logrus.WithFields(logrus.Fields{
@@ -159,7 +172,9 @@ func (h *virtualMachineHandler) OnVirtualMachineChange(_ string, vmObj *migratio
 		if err != nil {
 			return vm, err
 		}
+
 		vm.Status.Status = migration.VirtualMachineCreated
+
 		return h.importVM.UpdateStatus(vm)
 	case migration.VirtualMachineCreated:
 		// wait for VM to be running using a watch on VM's
@@ -176,7 +191,7 @@ func (h *virtualMachineHandler) OnVirtualMachineChange(_ string, vmObj *migratio
 			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
 		}).Info("The VM was imported successfully")
 		return vm, h.tidyUpObjects(vm)
-	case migration.VirtualMachineInvalid:
+	case migration.VirtualMachineImportInvalid:
 		logrus.WithFields(logrus.Fields{
 			"name":                    vm.Name,
 			"namespace":               vm.Namespace,
@@ -197,13 +212,8 @@ func (h *virtualMachineHandler) OnVirtualMachineChange(_ string, vmObj *migratio
 
 // preFlightChecks is used to validate that the associate sources and VM migration references are valid
 func (h *virtualMachineHandler) preFlightChecks(vm *migration.VirtualMachineImport) error {
-
-	if errs := validation.IsDNS1123Label(vm.Spec.VirtualMachineName); len(errs) != 0 {
-		return fmt.Errorf(migration.NotValidDNS1123Label)
-	}
-
-	if vm.Spec.SourceCluster.APIVersion != "migration.harvesterhci.io/v1beta1" {
-		return fmt.Errorf("expected migration cluster apiversion to be migration.harvesterhci.io/v1beta1 but got %s", vm.Spec.SourceCluster.APIVersion)
+	if vm.Spec.SourceCluster.APIVersion != expectedAPIVersion {
+		return fmt.Errorf("expected migration cluster apiversion to be '%s' but got '%s'", expectedAPIVersion, vm.Spec.SourceCluster.APIVersion)
 	}
 
 	var ss migration.SourceInterface
@@ -213,21 +223,21 @@ func (h *virtualMachineHandler) preFlightChecks(vm *migration.VirtualMachineImpo
 	case "vmwaresource", "openstacksource":
 		ss, err = h.generateSource(vm)
 		if err != nil {
-			return fmt.Errorf("error generating migration in preflight checks :%v", err)
+			return fmt.Errorf("error generating migration in preflight checks: %v", err)
 		}
 	default:
-		return fmt.Errorf("unsupported migration kind. Currently supported values are vmware/openstack but got %s", strings.ToLower(vm.Spec.SourceCluster.Kind))
+		return fmt.Errorf("unsupported migration kind. Currently supported values are vmware/openstack but got '%s'", strings.ToLower(vm.Spec.SourceCluster.Kind))
 	}
 
 	if ss.ClusterStatus() != migration.ClusterReady {
-		return fmt.Errorf("migration not yet ready. current status is %s", ss.ClusterStatus())
+		return fmt.Errorf("migration not yet ready. Current status is '%s'", ss.ClusterStatus())
 	}
 
 	// verify specified storage class exists. Empty storage class means default storage class
 	if vm.Spec.StorageClass != "" {
 		_, err := h.sc.Get(vm.Spec.StorageClass)
 		if err != nil {
-			logrus.Errorf("error looking up storageclass %s: %v", vm.Spec.StorageClass, err)
+			logrus.Errorf("error looking up storageclass '%s': %v", vm.Spec.StorageClass, err)
 			return err
 		}
 	}
@@ -304,13 +314,16 @@ func (h *virtualMachineHandler) triggerExport(vm *migration.VirtualMachineImport
 	// power off machine
 	if !util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweringOff, v1.ConditionTrue) {
 		logrus.WithFields(logrus.Fields{
-			"name":                    vm.Name,
-			"namespace":               vm.Namespace,
-			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
-		}).Info("Powering off client VM ...")
+			"name":                              vm.Name,
+			"namespace":                         vm.Namespace,
+			"spec.virtualMachineName":           vm.Spec.VirtualMachineName,
+			"spec.sourceCluster.kind":           vm.Spec.SourceCluster.Kind,
+			"spec.sourceCluster.name":           vm.Spec.SourceCluster.Name,
+			"status.definiteVirtualMachineName": vm.Status.DefiniteVirtualMachineName,
+		}).Info("Power off the source VM")
 		err = vmo.PowerOffVirtualMachine(vm)
 		if err != nil {
-			return fmt.Errorf("error in poweroff call: %v", err)
+			return fmt.Errorf("failed to power off the source VM: %v", err)
 		}
 		conds := []common.Condition{
 			{
@@ -352,6 +365,14 @@ func (h *virtualMachineHandler) triggerExport(vm *migration.VirtualMachineImport
 		util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweringOff, v1.ConditionTrue) &&
 		!util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineExported, v1.ConditionTrue) &&
 		!util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineExportFailed, v1.ConditionTrue) {
+		logrus.WithFields(logrus.Fields{
+			"name":                              vm.Name,
+			"namespace":                         vm.Namespace,
+			"spec.virtualMachineName":           vm.Spec.VirtualMachineName,
+			"spec.sourceCluster.name":           vm.Spec.SourceCluster.Name,
+			"spec.sourceCluster.kind":           vm.Spec.SourceCluster.Kind,
+			"status.definiteVirtualMachineName": vm.Status.DefiniteVirtualMachineName,
+		}).Info("Exporting source VM")
 		err := vmo.ExportVirtualMachine(vm)
 		if err != nil {
 			// avoid retrying if vm export fails
@@ -365,7 +386,14 @@ func (h *virtualMachineHandler) triggerExport(vm *migration.VirtualMachineImport
 				},
 			}
 			vm.Status.ImportConditions = util.MergeConditions(vm.Status.ImportConditions, conds)
-			logrus.Errorf("error exporting virtualmachine %s for virtualmachineimport %s-%s: %v", vm.Spec.VirtualMachineName, vm.Namespace, vm.Name, err)
+			logrus.WithFields(logrus.Fields{
+				"name":                              vm.Name,
+				"namespace":                         vm.Namespace,
+				"spec.virtualMachineName":           vm.Spec.VirtualMachineName,
+				"spec.sourceCluster.name":           vm.Spec.SourceCluster.Name,
+				"spec.sourceCluster.kind":           vm.Spec.SourceCluster.Kind,
+				"status.definiteVirtualMachineName": vm.Status.DefiniteVirtualMachineName,
+			}).Errorf("Failed to export source VM: %v", err)
 			return nil
 		}
 		conds := []common.Condition{
@@ -503,8 +531,9 @@ func (h *virtualMachineHandler) reconcileVMIStatus(vm *migration.VirtualMachineI
 func (h *virtualMachineHandler) createVirtualMachine(vm *migration.VirtualMachineImport) error {
 	vmo, err := h.generateVMO(vm)
 	if err != nil {
-		return fmt.Errorf("error generating VMO in createVirtualMachine :%v", err)
+		return fmt.Errorf("error generating VMO in createVirtualMachine: %v", err)
 	}
+
 	runVM, err := vmo.GenerateVirtualMachine(vm)
 	if err != nil {
 		return fmt.Errorf("error generating Kubevirt VM: %v", err)
@@ -546,37 +575,37 @@ func (h *virtualMachineHandler) createVirtualMachine(vm *migration.VirtualMachin
 
 	runVM.Spec.Template.Spec.Volumes = vmVols
 	runVM.Spec.Template.Spec.Domain.Devices.Disks = disks
-	// apply virtualmachineimport annotation
 
+	// Apply annotations to the `VirtualMachine` object to make the newly
+	// created VM identifiable.
 	if runVM.GetAnnotations() == nil {
 		runVM.Annotations = make(map[string]string)
 	}
-	runVM.Annotations[vmiAnnotation] = fmt.Sprintf("%s-%s", vm.Name, vm.Namespace)
+	runVM.Annotations[annotationVirtualMachineImport] = fmt.Sprintf("%s-%s", vm.Name, vm.Namespace)
 
+	// Make sure the new VM is created only if it does not exist.
 	found := false
-	existingVMO, err := h.kubevirt.Get(runVM.Namespace, runVM.Name, metav1.GetOptions{})
+	existingVM, err := h.kubevirt.Get(runVM.Namespace, runVM.Name, metav1.GetOptions{})
 	if err == nil {
-		if existingVMO.Annotations[vmiAnnotation] == fmt.Sprintf("%s-%s", vm.Name, vm.Namespace) {
+		if existingVM.Annotations[annotationVirtualMachineImport] == fmt.Sprintf("%s-%s", vm.Name, vm.Namespace) {
 			found = true
-			vm.Status.NewVirtualMachine = existingVMO.Name
 		}
 	}
 
 	if !found {
-		runVMObj, err := h.kubevirt.Create(runVM)
+		_, err := h.kubevirt.Create(runVM)
 		if err != nil {
-			return fmt.Errorf("error creating kubevirt VM in createVirtualMachine :%v", err)
+			return fmt.Errorf("error creating kubevirt VM in createVirtualMachine: %v", err)
 		}
-		vm.Status.NewVirtualMachine = runVMObj.Name
 	}
 
 	return nil
 }
 
 func (h *virtualMachineHandler) checkVirtualMachine(vm *migration.VirtualMachineImport) (bool, error) {
-	vmObj, err := h.kubevirt.Get(vm.Namespace, vm.Status.NewVirtualMachine, metav1.GetOptions{})
+	vmObj, err := h.kubevirt.Get(vm.Namespace, vm.Status.DefiniteVirtualMachineName, metav1.GetOptions{})
 	if err != nil {
-		return false, fmt.Errorf("error querying kubevirt vm in checkVirtualMachine :%v", err)
+		return false, fmt.Errorf("error querying kubevirt vm in checkVirtualMachine: %v", err)
 	}
 
 	return vmObj.Status.Ready, nil
@@ -707,7 +736,7 @@ func generateAnnotations(vm *migration.VirtualMachineImport, vmi *harvesterv1bet
 	annotationSchemaOwners := ref.AnnotationSchemaOwners{}
 	_ = annotationSchemaOwners.Add(kubevirt.VirtualMachineGroupVersionKind.GroupKind(), vm)
 	var schemaID = ref.GroupKindToSchemaID(kubevirt.VirtualMachineGroupVersionKind.GroupKind())
-	var ownerRef = ref.Construct(vm.GetNamespace(), vm.Spec.VirtualMachineName)
+	var ownerRef = ref.Construct(vm.GetNamespace(), vm.Status.DefiniteVirtualMachineName)
 	schemaRef := ref.AnnotationSchemaReference{SchemaID: schemaID, References: ref.NewAnnotationSchemaOwnerReferences()}
 	schemaRef.References.Insert(ownerRef)
 	annotationSchemaOwners[schemaID] = schemaRef
@@ -724,15 +753,14 @@ func generateAnnotations(vm *migration.VirtualMachineImport, vmi *harvesterv1bet
 
 func (h *virtualMachineHandler) checkAndCreateVirtualMachineImage(vm *migration.VirtualMachineImport, d migration.DiskInfo) (*harvesterv1beta1.VirtualMachineImage, error) {
 	imageList, err := h.vmi.Cache().List(vm.Namespace, labels.SelectorFromSet(map[string]string{
-		imageDisplayName: fmt.Sprintf("vm-import-%s-%s", vm.Name, d.Name),
+		labelImageDisplayName: fmt.Sprintf("vm-import-%s-%s", vm.Name, d.Name),
 	}))
-
 	if err != nil {
 		return nil, err
 	}
 
 	if len(imageList) > 1 {
-		return nil, fmt.Errorf("unexpected error: found %d images with label %s=%s, only expected to find one", len(imageList), imageDisplayName, fmt.Sprintf("vm-import-%s-%s", vm.Name, d.Name))
+		return nil, fmt.Errorf("unexpected error: found %d images with label %s=%s, only expected to find one", len(imageList), labelImageDisplayName, fmt.Sprintf("vm-import-%s-%s", vm.Name, d.Name))
 	}
 
 	if len(imageList) == 1 {
@@ -753,7 +781,7 @@ func (h *virtualMachineHandler) checkAndCreateVirtualMachineImage(vm *migration.
 				},
 			},
 			Labels: map[string]string{
-				imageDisplayName: fmt.Sprintf("vm-import-%s-%s", vm.Name, d.Name),
+				labelImageDisplayName: fmt.Sprintf("vm-import-%s-%s", vm.Name, d.Name),
 			},
 		},
 		Spec: harvesterv1beta1.VirtualMachineImageSpec{
@@ -770,5 +798,49 @@ func (h *virtualMachineHandler) checkAndCreateVirtualMachineImage(vm *migration.
 		}
 	}
 
-	return h.vmi.Create(vmi)
+	vmiObj, err := h.vmi.Create(vmi)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Kubevirt VMI (namespace=%s spec.displayName=%s): %v", vmi.Namespace, vmi.Spec.DisplayName, err)
+	}
+
+	return vmiObj, nil
+}
+
+func (h *virtualMachineHandler) sanitizeVirtualMachineImport(vm *migration.VirtualMachineImport) (*migration.VirtualMachineImport, error) {
+	vmo, err := h.generateVMO(vm)
+	if err != nil {
+		return nil, fmt.Errorf("error generating VMO in sanitizeVirtualMachineImport: %v", err)
+	}
+
+	err = vmo.SanitizeVirtualMachineImport(vm)
+	if err != nil {
+		vm.Status.Status = migration.VirtualMachineImportInvalid
+		logrus.WithFields(logrus.Fields{
+			"name":                              vm.Name,
+			"namespace":                         vm.Namespace,
+			"spec.virtualMachineName":           vm.Spec.VirtualMachineName,
+			"status.definiteVirtualMachineName": vm.Status.DefiniteVirtualMachineName,
+		}).Errorf("Failed to sanitize the '%s' object: %v", vm.Kind, err)
+	} else {
+		// Make sure the DefiniteVirtualMachineName is RFC 1123 compliant.
+		if errs := validation.IsDNS1123Label(vm.Status.DefiniteVirtualMachineName); len(errs) != 0 {
+			vm.Status.Status = migration.VirtualMachineImportInvalid
+			logrus.WithFields(logrus.Fields{
+				"name":                              vm.Name,
+				"namespace":                         vm.Namespace,
+				"spec.virtualMachineName":           vm.Spec.VirtualMachineName,
+				"status.definiteVirtualMachineName": vm.Status.DefiniteVirtualMachineName,
+			}).Error("The definite name of the target VM is not RFC 1123 compliant")
+		} else {
+			vm.Status.Status = migration.SourceReady
+			logrus.WithFields(logrus.Fields{
+				"name":                              vm.Name,
+				"namespace":                         vm.Namespace,
+				"spec.virtualMachineName":           vm.Spec.VirtualMachineName,
+				"status.definiteVirtualMachineName": vm.Status.DefiniteVirtualMachineName,
+			}).Infof("The sanitization of the '%s' object was successful", vm.Kind)
+		}
+	}
+
+	return h.importVM.UpdateStatus(vm)
 }

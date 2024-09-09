@@ -33,7 +33,7 @@ func RegisterOpenstackController(ctx context.Context, os migrationController.Ope
 	os.OnChange(ctx, "openstack-migration-change", oHandler.OnSourceChange)
 }
 
-func (h *openstackHandler) OnSourceChange(_ string, o *migration.OpenstackSource) (*migration.OpenstackSource, error) {
+func (h *openstackHandler) OnSourceChange(key string, o *migration.OpenstackSource) (*migration.OpenstackSource, error) {
 	if o == nil || o.DeletionTimestamp != nil {
 		return o, nil
 	}
@@ -42,7 +42,9 @@ func (h *openstackHandler) OnSourceChange(_ string, o *migration.OpenstackSource
 		"kind":      o.Kind,
 		"name":      o.Name,
 		"namespace": o.Namespace,
-	}).Info("Reconciling migration source")
+		"key":       key,
+	}).Info("Reconciling source")
+
 	if o.Status.Status != migration.ClusterReady {
 		// process migration logic
 		secretObj, err := h.secret.Get(o.Spec.Credentials.Namespace, o.Spec.Credentials.Name, metav1.GetOptions{})
@@ -52,7 +54,7 @@ func (h *openstackHandler) OnSourceChange(_ string, o *migration.OpenstackSource
 
 		client, err := openstack.NewClient(h.ctx, o.Spec.EndpointAddress, o.Spec.Region, secretObj, o.GetOptions().(migration.OpenstackSourceOptions))
 		if err != nil {
-			return o, fmt.Errorf("error generating openstack client for openstack migration: %s: %v", o.Name, err)
+			return o, fmt.Errorf("error generating openstack client for openstack migration '%s': %v", o.Name, err)
 		}
 
 		err = client.Verify()

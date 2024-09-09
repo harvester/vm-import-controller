@@ -48,7 +48,7 @@ func (h *virtualMachineHandler) reconcileDiskImageStatus(vm *migration.VirtualMa
 	// If VM has no disks associated ignore the VM
 	if len(orgStatus.DiskImportStatus) == 0 {
 		logrus.Errorf("Imported VM %s in namespace %s, has no disks, being marked as invalid and will be ignored", vm.Name, vm.Namespace)
-		vm.Status.Status = migration.VirtualMachineInvalid
+		vm.Status.Status = migration.VirtualMachineImportInvalid
 		return h.importVM.UpdateStatus(vm)
 
 	}
@@ -86,8 +86,8 @@ func (h *virtualMachineHandler) reconcileVirtualMachineStatus(vm *migration.Virt
 		return vm, err
 	}
 	if !ok {
-		// VM not running, requeue and check after 5mins
-		h.importVM.EnqueueAfter(vm.Namespace, vm.Name, 5*time.Minute)
+		// VM not running, requeue and check after 2mins
+		h.importVM.EnqueueAfter(vm.Namespace, vm.Name, 2*time.Minute)
 		return vm, nil
 	}
 
@@ -98,13 +98,15 @@ func (h *virtualMachineHandler) reconcileVirtualMachineStatus(vm *migration.Virt
 func (h *virtualMachineHandler) reconcilePreFlightChecks(vm *migration.VirtualMachineImport) (*migration.VirtualMachineImport, error) {
 	err := h.preFlightChecks(vm)
 	if err != nil {
-		if err.Error() != migration.NotValidDNS1123Label {
-			return vm, err
-		}
-		logrus.Errorf("vm migration target %s in VM %s in namespace %s is not RFC 1123 compliant", vm.Spec.VirtualMachineName, vm.Name, vm.Namespace)
-		vm.Status.Status = migration.VirtualMachineInvalid
+		logrus.WithFields(logrus.Fields{
+			"name":                    vm.Name,
+			"namespace":               vm.Namespace,
+			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+		}).Errorf("The preflight checks failed: %v", err)
+		// Stop the reconciling for good as the checks failed.
+		vm.Status.Status = migration.VirtualMachineImportInvalid
 	} else {
-		vm.Status.Status = migration.SourceReady
+		vm.Status.Status = migration.VirtualMachineImportValid
 	}
 	return h.importVM.UpdateStatus(vm)
 }
