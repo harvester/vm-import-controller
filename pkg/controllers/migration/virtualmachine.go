@@ -177,6 +177,17 @@ func (h *virtualMachineHandler) preFlightChecks(vm *migration.VirtualMachineImpo
 		}
 	}
 
+	// dedup source network names as the same source network name cannot appear twice
+	sourceNetworkMap := make(map[string]bool)
+	for _, network := range vm.Spec.Mapping {
+		_, ok := sourceNetworkMap[network.SourceNetwork]
+		if !ok {
+			sourceNetworkMap[network.SourceNetwork] = true
+			continue
+		}
+		return fmt.Errorf("source network %s appears multiple times in vm spec", network.SourceNetwork)
+	}
+
 	return nil
 }
 

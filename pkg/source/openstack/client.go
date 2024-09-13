@@ -334,23 +334,11 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		return nil, fmt.Errorf("error getting firware settings: %v", err)
 	}
 
-	var networks []networkInfo
-	for network, values := range vmObj.Addresses {
-		valArr, ok := values.([]interface{})
-		if !ok {
-			return nil, fmt.Errorf("error asserting interface []interface")
-		}
-		for _, v := range valArr {
-			valMap, ok := v.(map[string]interface{})
-			if !ok {
-				return nil, fmt.Errorf("error asserting network array element into map[string]string")
-			}
-			networks = append(networks, networkInfo{
-				NetworkName: network,
-				MAC:         valMap["OS-EXT-IPS-MAC:mac_addr"].(string),
-			})
-		}
+	networks, err := generateNetworkInfo(vmObj.Addresses)
+	if err != nil {
+		return nil, err
 	}
+
 	newVM := &kubevirt.VirtualMachine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      vm.Spec.VirtualMachineName,
@@ -636,4 +624,36 @@ func (c *Client) ImageFirmwareSettings(instance *servers.Server) (bool, bool, bo
 		secureBoot = true
 	}
 	return uefiType, tpmEnabled, secureBoot, nil
+}
+
+func generateNetworkInfo(info map[string]interface{}) ([]networkInfo, error) {
+	networks := make([]networkInfo, 0)
+	uniqueNetworks := make([]networkInfo, 0)
+	for network, values := range info {
+		valArr, ok := values.([]interface{})
+		if !ok {
+			return nil, fmt.Errorf("error asserting interface []interface")
+		}
+		for _, v := range valArr {
+			valMap, ok := v.(map[string]interface{})
+			if !ok {
+				return nil, fmt.Errorf("error asserting network array element into map[string]string")
+			}
+			networks = append(networks, networkInfo{
+				NetworkName: network,
+				MAC:         valMap["OS-EXT-IPS-MAC:mac_addr"].(string),
+			})
+		}
+	}
+	// in case of interfaces with ipv6 and ipv4 addresses they are reported twice, so we need to dedup them
+	// based on a mac address
+	networksMap := make(map[string]networkInfo)
+	for _, v := range networks {
+		networksMap[v.MAC] = v
+	}
+
+	for _, v := range networksMap {
+		uniqueNetworks = append(uniqueNetworks, v)
+	}
+	return uniqueNetworks, nil
 }
