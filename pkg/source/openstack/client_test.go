@@ -2,6 +2,7 @@ package openstack
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"testing"
 
@@ -123,4 +124,17 @@ func Test_GenerateVirtualMachine(t *testing.T) {
 	assert.NotEmpty(newVM.Spec.Template.Spec.Domain.Resources.Limits.Memory(), "expected memory limit to not be empty")
 	assert.NotEmpty(newVM.Spec.Template.Spec.Networks, "expected to find atleast 1 network as pod network should have been applied")
 	assert.NotEmpty(newVM.Spec.Template.Spec.Domain.Devices.Interfaces, "expected to find atleast 1 interface for pod-network")
+}
+
+func Test_generateNetworkInfo(t *testing.T) {
+	networkInfoByte := []byte(`{"private":[{"OS-EXT-IPS-MAC:mac_addr":"fa:16:3e:92:5f:45","OS-EXT-IPS:type":"fixed","addr":"fd5b:731d:94e1:0:f816:3eff:fe92:5f45","version":6},{"OS-EXT-IPS-MAC:mac_addr":"fa:16:3e:92:5f:45","OS-EXT-IPS:type":"fixed","addr":"10.0.0.38","version":4}],"shared":[{"OS-EXT-IPS-MAC:mac_addr":"fa:16:3e:ec:49:11","OS-EXT-IPS:type":"fixed","addr":"192.168.233.233","version":4}]}`)
+	var networkInfoMap map[string]interface{}
+	assert := require.New(t)
+	err := json.Unmarshal(networkInfoByte, &networkInfoMap)
+	assert.NoError(err, "expected no error while unmarshalling network info")
+
+	vmInterfaceDetails, err := generateNetworkInfo(networkInfoMap)
+	assert.NoError(err, "expected no error while generating network info")
+	assert.Len(vmInterfaceDetails, 2, "expected to find 2 interfaces only")
+
 }
