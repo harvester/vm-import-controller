@@ -20,6 +20,8 @@ import (
 	log "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	k8scnicncfiov1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/controllers"
 	"github.com/harvester/vm-import-controller/pkg/server"
@@ -81,8 +83,9 @@ var _ = BeforeSuite(func() {
 	testEnv = &envtest.Environment{}
 
 	if !useExisting {
-		crds, err := setup.GenerateKubeVirtCRD()
+		crds, err := setup.GenerateCRD()
 		Expect(err).ToNot(HaveOccurred())
+
 		testEnv.CRDInstallOptions = envtest.CRDInstallOptions{
 			CRDs: crds,
 		}
@@ -105,6 +108,9 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 
 	err = kubevirtv1.AddToScheme(scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = k8scnicncfiov1.AddToScheme(scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme})

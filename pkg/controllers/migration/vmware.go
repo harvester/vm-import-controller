@@ -33,12 +33,16 @@ func RegisterVmwareController(ctx context.Context, vc migrationController.Vmware
 	vc.OnChange(ctx, "vmware-migration-change", vHandler.OnSourceChange)
 }
 
-func (h *vmwareHandler) OnSourceChange(key string, v *migration.VmwareSource) (*migration.VmwareSource, error) {
+func (h *vmwareHandler) OnSourceChange(_ string, v *migration.VmwareSource) (*migration.VmwareSource, error) {
 	if v == nil || v.DeletionTimestamp != nil {
 		return v, nil
 	}
 
-	logrus.Infof("reoncilling vmware migration %s", key)
+	logrus.WithFields(logrus.Fields{
+		"kind":      v.Kind,
+		"name":      v.Name,
+		"namespace": v.Namespace,
+	}).Info("Reconciling migration source")
 	if v.Status.Status != migration.ClusterReady {
 		secretObj, err := h.secret.Get(v.Spec.Credentials.Namespace, v.Spec.Credentials.Name, metav1.GetOptions{})
 		if err != nil {
@@ -57,7 +61,7 @@ func (h *vmwareHandler) OnSourceChange(key string, v *migration.VmwareSource) (*
 				"name":       v.Name,
 				"namespace":  v.Namespace,
 				"err":        err,
-			}).Error("failed to verfiy client for vmware migration")
+			}).Error("failed to verify client for vmware migration")
 			// unable to find specific datacenter
 			conds := []common.Condition{
 				{

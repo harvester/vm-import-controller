@@ -5,6 +5,7 @@ import (
 	"time"
 
 	harvester "github.com/harvester/harvester/pkg/generated/controllers/harvesterhci.io"
+	cniv1 "github.com/harvester/harvester/pkg/generated/controllers/k8s.cni.cncf.io"
 	"github.com/harvester/harvester/pkg/generated/controllers/kubevirt.io"
 	"github.com/rancher/lasso/pkg/cache"
 	"github.com/rancher/lasso/pkg/client"
@@ -86,13 +87,20 @@ func Register(ctx context.Context, restConfig *rest.Config) error {
 
 	scCache := storageFactory.Storage().V1().StorageClass().Cache()
 
+	cniFactory, err := cniv1.NewFactoryFromConfigWithOptions(restConfig, &core.FactoryOptions{
+		SharedControllerFactory: scf,
+	})
+	if err != nil {
+		return err
+	}
+
 	sc.RegisterVmwareController(ctx, migrationFactory.Migration().V1beta1().VmwareSource(), coreFactory.Core().V1().Secret())
 	sc.RegisterOpenstackController(ctx, migrationFactory.Migration().V1beta1().OpenstackSource(), coreFactory.Core().V1().Secret())
 
 	sc.RegisterVMImportController(ctx, migrationFactory.Migration().V1beta1().VmwareSource(), migrationFactory.Migration().V1beta1().OpenstackSource(),
 		coreFactory.Core().V1().Secret(), migrationFactory.Migration().V1beta1().VirtualMachineImport(),
 		harvesterFactory.Harvesterhci().V1beta1().VirtualMachineImage(), kubevirtFactory.Kubevirt().V1().VirtualMachine(),
-		coreFactory.Core().V1().PersistentVolumeClaim(), scCache)
+		coreFactory.Core().V1().PersistentVolumeClaim(), scCache, cniFactory.K8s().V1().NetworkAttachmentDefinition().Cache())
 
-	return start.All(ctx, 1, migrationFactory, coreFactory, harvesterFactory, kubevirtFactory, storageFactory)
+	return start.All(ctx, 1, migrationFactory, coreFactory, harvesterFactory, kubevirtFactory, storageFactory, cniFactory)
 }
