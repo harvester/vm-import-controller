@@ -17,11 +17,6 @@ func ConvertVMDKtoRAW(source, target string) error {
 	return runCommand(defaultCommand, args...)
 }
 
-func ConvertQCOW2toRAW(source, target string) error {
-	args := []string{"convert", "-f", "qcow2", "-O", "raw", source, target}
-	return runCommand(defaultCommand, args...)
-}
-
 func createVMDK(path string, size string) error {
 	args := []string{"create", "-f", "vmdk", path, size}
 	return runCommand(defaultCommand, args...)

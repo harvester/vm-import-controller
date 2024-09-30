@@ -29,7 +29,6 @@ import (
 	kubevirt "kubevirt.io/api/core/v1"
 
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
-	"github.com/harvester/vm-import-controller/pkg/qemu"
 	"github.com/harvester/vm-import-controller/pkg/server"
 )
 
@@ -172,27 +171,32 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 		return err
 	}
 
-	tmpDir, err := os.MkdirTemp("/tmp", "openstack-image-")
-	if err != nil {
-		return fmt.Errorf("error creating tmp image directory: %v", err)
-	}
+	for vIndex, v := range vmObj.AttachedVolumes {
+		imageName := fmt.Sprintf("import-controller-%s-%d", vm.Spec.VirtualMachineName, vIndex)
 
-	for i, v := range vmObj.AttachedVolumes {
 		// create snapshot for volume
 		snapInfo, err := snapshots.Create(c.storageClient, snapshots.CreateOpts{
-			Name:     fmt.Sprintf("import-controller-%v-%d", vm.Spec.VirtualMachineName, i),
+			Name:     imageName,
 			VolumeID: v.ID,
 			Force:    true,
 		}).Extract()
-
 		// snapshot creation is async, so call returns a 202 error when successful.
 		// this is ignored
 		if err != nil {
 			return err
 		}
 
+		logrus.WithFields(logrus.Fields{
+			"name":                    vm.Name,
+			"namespace":               vm.Namespace,
+			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+			"snapshot.id":             snapInfo.ID,
+			"snapshot.name":           snapInfo.Name,
+			"snapshot.size":           snapInfo.Size,
+		}).Info("Waiting for snapshot to be available")
+
 		if err := snapshots.WaitForStatus(c.storageClient, snapInfo.ID, "available", pollingTimeout); err != nil {
-			return fmt.Errorf("timeout waiting for snapshot %v to become available: %v", snapInfo.ID, err)
+			return fmt.Errorf("timeout waiting for snapshot %s to be available: %v", snapInfo.ID, err)
 		}
 
 		volObj, err := volumes.Create(c.storageClient, volumes.CreateOpts{
@@ -207,30 +211,41 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			"name":                    vm.Name,
 			"namespace":               vm.Namespace,
 			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
-			"volume":                  volObj,
-		}).Info("Attempting to create new image from volume")
+			"volume.id":               volObj.ID,
+			"volume.createdAt":        volObj.CreatedAt,
+			"volume.snapshotID":       volObj.SnapshotID,
+			"volume.size":             volObj.Size,
+			"volume.status":           volObj.Status,
+		}).Info("Waiting for volume to be available")
 
 		if err := volumes.WaitForStatus(c.storageClient, volObj.ID, "available", pollingTimeout); err != nil {
-			return fmt.Errorf("timeout waiting for volumes %v to become available: %v", volObj.ID, err)
+			return fmt.Errorf("timeout waiting for volume %s to be available: %v", volObj.ID, err)
 		}
 
 		volImage, err := volumeactions.UploadImage(c.storageClient, volObj.ID, volumeactions.UploadImageOpts{
-			ImageName:  fmt.Sprintf("import-controller-%s-%d", vm.Spec.VirtualMachineName, i),
-			DiskFormat: "qcow2",
+			ImageName:  imageName,
+			DiskFormat: "raw",
 		}).Extract()
-
 		if err != nil {
 			return err
 		}
+
 		// wait for image to be ready
 		for i := 0; i < defaultCount; i++ {
 			imgObj, err := images.Get(c.imageClient, volImage.ImageID).Extract()
 			if err != nil {
-				return fmt.Errorf("error checking status of volume image: %v", err)
+				return fmt.Errorf("error checking status of volume image %s: %v", volImage.ImageID, err)
 			}
 			if imgObj.Status == "active" {
 				break
 			}
+			logrus.WithFields(logrus.Fields{
+				"name":                    vm.Name,
+				"namespace":               vm.Namespace,
+				"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+				"image.id":                imgObj.ID,
+				"image.status":            imgObj.Status,
+			}).Info("Waiting for raw image to be available")
 			time.Sleep(defaultInterval)
 		}
 
@@ -239,28 +254,17 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			return err
 		}
 
-		imageContents, err := io.ReadAll(contents)
+		rawImageFileName := fmt.Sprintf("%s-%d.img", vmObj.Name, vIndex)
+
+		logrus.WithFields(logrus.Fields{
+			"name":                    vm.Name,
+			"namespace":               vm.Namespace,
+			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+			"volume.imageID":          volImage.ImageID,
+		}).Info("Downloading raw image")
+		err = writeRawImageFile(filepath.Join(server.TempDir(), rawImageFileName), contents)
 		if err != nil {
 			return err
-		}
-
-		qcowFileName := filepath.Join(tmpDir, fmt.Sprintf("%s-%d", vm.Spec.VirtualMachineName, i))
-		imgFile, err := os.Create(qcowFileName)
-		if err != nil {
-			return fmt.Errorf("error creating disk file: %v", err)
-		}
-
-		_, err = imgFile.Write(imageContents)
-		if err != nil {
-			return err
-		}
-		imgFile.Close()
-
-		// downloaded image is qcow2. Convert to raw file
-		rawFileName := filepath.Join(server.TempDir(), fmt.Sprintf("%s-%d.img", vmObj.Name, i))
-		err = qemu.ConvertQCOW2toRAW(qcowFileName, rawFileName)
-		if err != nil {
-			return fmt.Errorf("error converting qcow2 to raw file: %v", err)
 		}
 
 		if err := volumes.Delete(c.storageClient, volObj.ID, volumes.DeleteOpts{}).ExtractErr(); err != nil {
@@ -276,13 +280,14 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 		}
 
 		vm.Status.DiskImportStatus = append(vm.Status.DiskImportStatus, migration.DiskInfo{
-			Name:          fmt.Sprintf("%s-%d.img", vmObj.Name, i),
+			Name:          rawImageFileName,
 			DiskSize:      int64(volObj.Size),
 			DiskLocalPath: server.TempDir(),
 			BusType:       kubevirt.DiskBusVirtio,
 		})
 	}
-	return os.RemoveAll(tmpDir)
+
+	return nil
 }
 
 func (c *Client) PowerOffVirtualMachine(vm *migration.VirtualMachineImport) error {
@@ -659,4 +664,17 @@ func generateNetworkInfo(info map[string]interface{}) ([]networkInfo, error) {
 		uniqueNetworks = append(uniqueNetworks, v)
 	}
 	return uniqueNetworks, nil
+}
+
+// writeRawImageFile Download and write the raw image file to the specified path in chunks of 32KiB.
+func writeRawImageFile(name string, src io.ReadCloser) error {
+	dst, err := os.Create(name)
+	if err != nil {
+		return fmt.Errorf("error creating raw image file: %v", err)
+	}
+
+	defer dst.Close()
+
+	_, err = io.Copy(dst, src)
+	return err
 }
