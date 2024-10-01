@@ -36,8 +36,6 @@ import (
 const (
 	NotUniqueName         = "notUniqueName"
 	NotServerFound        = "noServerFound"
-	defaultInterval       = 10 * time.Second
-	defaultCount          = 30
 	pollingTimeout        = 2 * 60 * 60 // in seconds
 	annotationDescription = "field.cattle.io/description"
 )
@@ -49,6 +47,7 @@ type Client struct {
 	storageClient *gophercloud.ServiceClient
 	computeClient *gophercloud.ServiceClient
 	imageClient   *gophercloud.ServiceClient
+	options       migration.OpenstackSourceOptions
 }
 
 type ExtendedVolume struct {
@@ -65,7 +64,7 @@ type ExtendedServer struct {
 }
 
 // NewClient will generate a GopherCloud client
-func NewClient(ctx context.Context, endpoint string, region string, secret *corev1.Secret) (*Client, error) {
+func NewClient(ctx context.Context, endpoint string, region string, secret *corev1.Secret, options migration.OpenstackSourceOptions) (*Client, error) {
 	username, ok := secret.Data["username"]
 	if !ok {
 		return nil, fmt.Errorf("no username provided in secret %s", secret.Name)
@@ -86,18 +85,18 @@ func NewClient(ctx context.Context, endpoint string, region string, secret *core
 		return nil, fmt.Errorf("no domain_name provided in secret %s", secret.Name)
 	}
 
-	config := &tls.Config{}
+	tlsClientConfig := &tls.Config{}
 
 	customCA, ok := secret.Data["ca_cert"]
 	if ok {
 		caCertPool := x509.NewCertPool()
 		caCertPool.AppendCertsFromPEM(customCA)
-		config.RootCAs = caCertPool
+		tlsClientConfig.RootCAs = caCertPool
 	} else {
-		config.InsecureSkipVerify = true
+		tlsClientConfig.InsecureSkipVerify = true
 	}
 
-	tr := &http.Transport{TLSClientConfig: config}
+	tr := &http.Transport{TLSClientConfig: tlsClientConfig}
 
 	authOpts := gophercloud.AuthOptions{
 		IdentityEndpoint: endpoint,
@@ -143,6 +142,7 @@ func NewClient(ctx context.Context, endpoint string, region string, secret *core
 		storageClient: storageClient,
 		computeClient: computeClient,
 		imageClient:   imageClient,
+		options:       options,
 	}, nil
 }
 
@@ -237,6 +237,8 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			"volume.snapshotID":       volObj.SnapshotID,
 			"volume.size":             volObj.Size,
 			"volume.status":           volObj.Status,
+			"retryCount":              c.options.UploadImageRetryCount,
+			"retryDelay":              c.options.UploadImageRetryDelay,
 		}).Info("Waiting for volume to be available")
 
 		if err := volumes.WaitForStatus(c.storageClient, volObj.ID, "available", pollingTimeout); err != nil {
@@ -252,7 +254,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 		}
 
 		// wait for image to be ready
-		for i := 0; i < defaultCount; i++ {
+		for i := 0; i < c.options.UploadImageRetryCount; i++ {
 			imgObj, err := images.Get(c.imageClient, volImage.ImageID).Extract()
 			if err != nil {
 				return fmt.Errorf("error checking status of volume image %s: %v", volImage.ImageID, err)
@@ -267,7 +269,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 				"image.id":                imgObj.ID,
 				"image.status":            imgObj.Status,
 			}).Info("Waiting for raw image to be available")
-			time.Sleep(defaultInterval)
+			time.Sleep(time.Duration(c.options.UploadImageRetryDelay) * time.Second)
 		}
 
 		contents, err := imagedata.Download(c.imageClient, volImage.ImageID).Extract()

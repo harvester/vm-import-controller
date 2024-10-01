@@ -50,7 +50,7 @@ func (h *openstackHandler) OnSourceChange(_ string, o *migration.OpenstackSource
 			return o, fmt.Errorf("error looking up secret for openstacksource: %v", err)
 		}
 
-		client, err := openstack.NewClient(h.ctx, o.Spec.EndpointAddress, o.Spec.Region, secretObj)
+		client, err := openstack.NewClient(h.ctx, o.Spec.EndpointAddress, o.Spec.Region, secretObj, o.GetOptions().(migration.OpenstackSourceOptions))
 		if err != nil {
 			return o, fmt.Errorf("error generating openstack client for openstack migration: %s: %v", o.Name, err)
 		}
