@@ -123,6 +123,23 @@ func (c *Client) Verify() error {
 	return nil
 }
 
+func (c *Client) PreFlightChecks(vm *migration.VirtualMachineImport) (err error) {
+	f := find.NewFinder(c.Client.Client, true)
+	dc := c.dc
+	if !strings.HasPrefix(c.dc, "/") {
+		dc = fmt.Sprintf("/%s", c.dc)
+	}
+	for _, nm := range vm.Spec.Mapping {
+		// The path looks like `/<datacenter>/network/<network-name>`.
+		path := filepath.Join(dc, "/network", nm.SourceNetwork)
+		_, err := f.Network(c.ctx, path)
+		if err != nil {
+			return fmt.Errorf("error getting source network '%s': %v", nm.SourceNetwork, err)
+		}
+	}
+	return nil
+}
+
 func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err error) {
 	var (
 		tmpPath string

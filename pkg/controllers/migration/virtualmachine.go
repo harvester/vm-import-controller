@@ -19,6 +19,7 @@ import (
 
 	harvesterv1beta1 "github.com/harvester/harvester/pkg/apis/harvesterhci.io/v1beta1"
 	harvester "github.com/harvester/harvester/pkg/generated/controllers/harvesterhci.io/v1beta1"
+	ctlcniv1 "github.com/harvester/harvester/pkg/generated/controllers/k8s.cni.cncf.io/v1"
 	kubevirtv1 "github.com/harvester/harvester/pkg/generated/controllers/kubevirt.io/v1"
 	"github.com/harvester/harvester/pkg/ref"
 	coreControllers "github.com/rancher/wrangler/pkg/generated/controllers/core/v1"
@@ -46,13 +47,16 @@ type VirtualMachineOperations interface {
 	// Any image format conversion will be performed by the VM Operation
 	ExportVirtualMachine(vm *migration.VirtualMachineImport) error
 
-	// PowerOffVirtualMachine is responsible for the powering off the virtualmachine
+	// PowerOffVirtualMachine is responsible for the powering off the virtual machine
 	PowerOffVirtualMachine(vm *migration.VirtualMachineImport) error
 
 	// IsPoweredOff will check the status of VM Power and return true if machine is powered off
 	IsPoweredOff(vm *migration.VirtualMachineImport) (bool, error)
 
 	GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*kubevirt.VirtualMachine, error)
+
+	// PreFlightChecks checks the cluster specific configurations.
+	PreFlightChecks(vm *migration.VirtualMachineImport) error
 }
 
 type virtualMachineHandler struct {
@@ -65,10 +69,11 @@ type virtualMachineHandler struct {
 	kubevirt  kubevirtv1.VirtualMachineController
 	pvc       coreControllers.PersistentVolumeClaimController
 	sc        storageControllers.StorageClassCache
+	nadCache  ctlcniv1.NetworkAttachmentDefinitionCache
 }
 
 func RegisterVMImportController(ctx context.Context, vmware migrationController.VmwareSourceController, openstack migrationController.OpenstackSourceController,
-	secret coreControllers.SecretController, importVM migrationController.VirtualMachineImportController, vmi harvester.VirtualMachineImageController, kubevirt kubevirtv1.VirtualMachineController, pvc coreControllers.PersistentVolumeClaimController, scCache storageControllers.StorageClassCache) {
+	secret coreControllers.SecretController, importVM migrationController.VirtualMachineImportController, vmi harvester.VirtualMachineImageController, kubevirt kubevirtv1.VirtualMachineController, pvc coreControllers.PersistentVolumeClaimController, scCache storageControllers.StorageClassCache, nadCache ctlcniv1.NetworkAttachmentDefinitionCache) {
 
 	vmHandler := &virtualMachineHandler{
 		ctx:       ctx,
@@ -80,6 +85,7 @@ func RegisterVMImportController(ctx context.Context, vmware migrationController.
 		kubevirt:  kubevirt,
 		pvc:       pvc,
 		sc:        scCache,
+		nadCache:  nadCache,
 	}
 
 	relatedresource.Watch(ctx, "virtualmachineimage-change", vmHandler.ReconcileVMI, importVM, vmi)
@@ -235,6 +241,55 @@ func (h *virtualMachineHandler) preFlightChecks(vm *migration.VirtualMachineImpo
 			continue
 		}
 		return fmt.Errorf("source network %s appears multiple times in vm spec", network.SourceNetwork)
+	}
+
+	// Validate the destination network configuration.
+	for _, nm := range vm.Spec.Mapping {
+		// The destination network supports the following format:
+		// - <networkName>
+		// - <namespace>/<networkName>
+		// See `MultusNetwork.NetworkName` for more details.
+		parts := strings.Split(nm.DestinationNetwork, "/")
+		switch len(parts) {
+		case 1:
+			// If namespace is not specified, `VirtualMachineImport` namespace is assumed.
+			parts = append([]string{vm.Namespace}, parts[0])
+			fallthrough
+		case 2:
+			_, err := h.nadCache.Get(parts[0], parts[1])
+			if err != nil {
+				logrus.WithFields(logrus.Fields{
+					"name":                    vm.Name,
+					"namespace":               vm.Namespace,
+					"spec.sourcecluster.kind": vm.Spec.SourceCluster.Kind,
+				}).Errorf("Failed to get destination network '%s/%s': %v",
+					parts[0], parts[1], err)
+				return err
+			}
+		default:
+			logrus.WithFields(logrus.Fields{
+				"name":                    vm.Name,
+				"namespace":               vm.Namespace,
+				"spec.sourcecluster.kind": vm.Spec.SourceCluster.Kind,
+			}).Errorf("Invalid destination network '%s'", nm.DestinationNetwork)
+			return fmt.Errorf("invalid destination network '%s'", nm.DestinationNetwork)
+		}
+	}
+
+	// Validate the source network as part of the source cluster preflight
+	// checks.
+	vmo, err := h.generateVMO(vm)
+	if err != nil {
+		return fmt.Errorf("error generating VMO in preFlightChecks: %v", err)
+	}
+	err = vmo.PreFlightChecks(vm)
+	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"name":                    vm.Name,
+			"namespace":               vm.Namespace,
+			"spec.sourcecluster.kind": vm.Spec.SourceCluster.Kind,
+		}).Errorf("Failed to perform source cluster specific preflight checks: %v", err)
+		return err
 	}
 
 	return nil

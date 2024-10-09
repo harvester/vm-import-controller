@@ -22,6 +22,7 @@ import (
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/servers"
 	"github.com/gophercloud/gophercloud/openstack/imageservice/v2/imagedata"
 	"github.com/gophercloud/gophercloud/openstack/imageservice/v2/images"
+	"github.com/gophercloud/gophercloud/openstack/networking/v2/networks"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -173,6 +174,16 @@ func (c *Client) Verify() error {
 	}
 
 	logrus.Infof("found %d servers", len(allServers))
+	return nil
+}
+
+func (c *Client) PreFlightChecks(vm *migration.VirtualMachineImport) (err error) {
+	for _, nm := range vm.Spec.Mapping {
+		_, err := networks.Get(c.computeClient, nm.SourceNetwork).Extract()
+		if err != nil {
+			return fmt.Errorf("error getting source network '%s': %v", nm.SourceNetwork, err)
+		}
+	}
 	return nil
 }
 
