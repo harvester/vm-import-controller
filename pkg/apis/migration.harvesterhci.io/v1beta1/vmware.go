@@ -54,3 +54,7 @@ func (v *VmwareSource) GetKind() string {
 func (v *VmwareSource) GetConnectionInfo() (string, string) {
 	return v.Spec.EndpointAddress, v.Spec.Datacenter
 }
+
+func (v *VmwareSource) GetOptions() interface{} {
+	return nil
+}
