@@ -226,7 +226,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 	// once the disks are converted this needs to be updated to ".img"
 	// spec for how download_url is generated
 	// 				Spec: harvesterv1beta1.VirtualMachineImageSpec{
-	//					DisplayName: fmt.Sprintf("vm-import-%s-%s", vm.Name, d.Name),
+	//					DisplayName: fmt.Sprintf("vm-import-%s", d.Name),
 	//					URL: fmt.Sprintf("http://%s:%d/%s.img", server.Address(), server.DefaultPort(), d.Name),
 	//				},
 
@@ -238,7 +238,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 		destFile := filepath.Join(server.TempDir(), rawDiskName)
 		err = qemu.ConvertVMDKtoRAW(sourceFile, destFile)
 		if err != nil {
-			return fmt.Errorf("error during conversion of vmdk to raw disk %v", err)
+			return fmt.Errorf("error during conversion of vmdk to raw disk: %v", err)
 		}
 		// update fields to reflect final location of raw image file
 		vm.Status.DiskImportStatus[i].DiskLocalPath = server.TempDir()
