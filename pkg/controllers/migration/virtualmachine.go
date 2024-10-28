@@ -413,7 +413,6 @@ func (h *virtualMachineHandler) triggerExport(vm *migration.VirtualMachineImport
 
 // generateVMO is a wrapper to generate a VirtualMachineOperations client
 func (h *virtualMachineHandler) generateVMO(vm *migration.VirtualMachineImport) (VirtualMachineOperations, error) {
-
 	source, err := h.generateSource(vm)
 	if err != nil {
 		return nil, fmt.Errorf("error generating migration interface: %v", err)
@@ -752,15 +751,19 @@ func generateAnnotations(vm *migration.VirtualMachineImport, vmi *harvesterv1bet
 }
 
 func (h *virtualMachineHandler) checkAndCreateVirtualMachineImage(vm *migration.VirtualMachineImport, d migration.DiskInfo) (*harvesterv1beta1.VirtualMachineImage, error) {
+	// Note, the RFC 1123 compliant name of the disk is used here because
+	// the variable value is later used as a label.
+	imageDisplayName := fmt.Sprintf("vm-import-%s", d.Name)
+
 	imageList, err := h.vmi.Cache().List(vm.Namespace, labels.SelectorFromSet(map[string]string{
-		labelImageDisplayName: fmt.Sprintf("vm-import-%s-%s", vm.Name, d.Name),
+		labelImageDisplayName: imageDisplayName,
 	}))
 	if err != nil {
 		return nil, err
 	}
 
 	if len(imageList) > 1 {
-		return nil, fmt.Errorf("unexpected error: found %d images with label %s=%s, only expected to find one", len(imageList), labelImageDisplayName, fmt.Sprintf("vm-import-%s-%s", vm.Name, d.Name))
+		return nil, fmt.Errorf("unexpected error: found %d images with label %s=%s, only expected to find one", len(imageList), labelImageDisplayName, imageDisplayName)
 	}
 
 	if len(imageList) == 1 {
@@ -781,11 +784,15 @@ func (h *virtualMachineHandler) checkAndCreateVirtualMachineImage(vm *migration.
 				},
 			},
 			Labels: map[string]string{
-				labelImageDisplayName: fmt.Sprintf("vm-import-%s-%s", vm.Name, d.Name),
+				// Set the `harvesterhci.io/imageDisplayName` label to be
+				// able to search for the `VirtualMachineImage` object during
+				// the reconciliation phase. See code above at the beginning
+				// of this function.
+				labelImageDisplayName: imageDisplayName,
 			},
 		},
 		Spec: harvesterv1beta1.VirtualMachineImageSpec{
-			DisplayName: fmt.Sprintf("vm-import-%s-%s", vm.Name, d.Name),
+			DisplayName: imageDisplayName,
 			URL:         fmt.Sprintf("http://%s:%d/%s", server.Address(), server.DefaultPort(), d.Name),
 			SourceType:  "download",
 		},
@@ -800,7 +807,7 @@ func (h *virtualMachineHandler) checkAndCreateVirtualMachineImage(vm *migration.
 
 	vmiObj, err := h.vmi.Create(vmi)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Kubevirt VMI (namespace=%s spec.displayName=%s): %v", vmi.Namespace, vmi.Spec.DisplayName, err)
+		return nil, fmt.Errorf("failed to create Kubevirt VMI (namespace=%s, spec.displayName=%s): %v", vmi.Namespace, vmi.Spec.DisplayName, err)
 	}
 
 	return vmiObj, nil
@@ -816,16 +823,18 @@ func (h *virtualMachineHandler) sanitizeVirtualMachineImport(vm *migration.Virtu
 	if err != nil {
 		vm.Status.Status = migration.VirtualMachineImportInvalid
 		logrus.WithFields(logrus.Fields{
+			"kind":                              vm.Kind,
 			"name":                              vm.Name,
 			"namespace":                         vm.Namespace,
 			"spec.virtualMachineName":           vm.Spec.VirtualMachineName,
 			"status.definiteVirtualMachineName": vm.Status.DefiniteVirtualMachineName,
-		}).Errorf("Failed to sanitize the '%s' object: %v", vm.Kind, err)
+		}).Errorf("Failed to sanitize the import spec: %v", err)
 	} else {
 		// Make sure the DefiniteVirtualMachineName is RFC 1123 compliant.
 		if errs := validation.IsDNS1123Label(vm.Status.DefiniteVirtualMachineName); len(errs) != 0 {
 			vm.Status.Status = migration.VirtualMachineImportInvalid
 			logrus.WithFields(logrus.Fields{
+				"kind":                              vm.Kind,
 				"name":                              vm.Name,
 				"namespace":                         vm.Namespace,
 				"spec.virtualMachineName":           vm.Spec.VirtualMachineName,
@@ -834,11 +843,12 @@ func (h *virtualMachineHandler) sanitizeVirtualMachineImport(vm *migration.Virtu
 		} else {
 			vm.Status.Status = migration.SourceReady
 			logrus.WithFields(logrus.Fields{
+				"kind":                              vm.Kind,
 				"name":                              vm.Name,
 				"namespace":                         vm.Namespace,
 				"spec.virtualMachineName":           vm.Spec.VirtualMachineName,
 				"status.definiteVirtualMachineName": vm.Status.DefiniteVirtualMachineName,
-			}).Infof("The sanitization of the '%s' object was successful", vm.Kind)
+			}).Info("The sanitization of the import spec was successful")
 		}
 	}
 

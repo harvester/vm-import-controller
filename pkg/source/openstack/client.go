@@ -28,6 +28,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	kubevirt "kubevirt.io/api/core/v1"
 
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
@@ -178,12 +179,36 @@ func (c *Client) Verify() error {
 }
 
 func (c *Client) PreFlightChecks(vm *migration.VirtualMachineImport) (err error) {
+	// Check the source network mappings.
 	for _, nm := range vm.Spec.Mapping {
 		_, err := networks.Get(c.computeClient, nm.SourceNetwork).Extract()
 		if err != nil {
 			return fmt.Errorf("error getting source network '%s': %v", nm.SourceNetwork, err)
 		}
 	}
+
+	// Make sure the `harvesterhci.io/imageDisplayName` label set to the
+	// VirtualMachineImages meets the DNS-1123 standard.
+	// Note, in order to be able to validate the label content, we must
+	// temporarily bring forward the step `SanitizeVirtualMachineImport`,
+	// which is actually carried out after the preflight checks, as we
+	// need the definitive VM name here.
+	sanitizedVM := vm.DeepCopy()
+	if err := c.SanitizeVirtualMachineImport(sanitizedVM); err != nil {
+		return fmt.Errorf("failed to sanitize the object (Kind=%s, Name=%s) during preflight check: %v",
+			sanitizedVM.Kind, sanitizedVM.Name, err)
+	}
+	vmObj, err := c.findVM(sanitizedVM.Spec.VirtualMachineName)
+	if err != nil {
+		return err
+	}
+	for vIndex := range vmObj.AttachedVolumes {
+		imageDisplayName := fmt.Sprintf("vm-import-%s-%d.img", sanitizedVM.Status.DefiniteVirtualMachineName, vIndex)
+		if errs := validation.IsDNS1123Label(imageDisplayName); len(errs) != 0 {
+			return fmt.Errorf("the VM display image name '%s' will not be RFC 1123 compliant: %v", imageDisplayName, errs)
+		}
+	}
+
 	return nil
 }
 
@@ -296,7 +321,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			return err
 		}
 
-		rawImageFileName := fmt.Sprintf("%s-%d.img", vmObj.Name, vIndex)
+		rawImageFileName := fmt.Sprintf("%s-%d.img", vm.Status.DefiniteVirtualMachineName, vIndex)
 
 		logrus.WithFields(logrus.Fields{
 			"name":                    vm.Name,
