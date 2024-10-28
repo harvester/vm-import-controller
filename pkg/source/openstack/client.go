@@ -49,6 +49,7 @@ type Client struct {
 	storageClient *gophercloud.ServiceClient
 	computeClient *gophercloud.ServiceClient
 	imageClient   *gophercloud.ServiceClient
+	networkClient *gophercloud.ServiceClient
 	options       migration.OpenstackSourceOptions
 }
 
@@ -137,6 +138,11 @@ func NewClient(ctx context.Context, endpoint string, region string, secret *core
 		return nil, fmt.Errorf("error generating image client: %v", err)
 	}
 
+	networkClient, err := openstack.NewNetworkV2(client, endPointOpts)
+	if err != nil {
+		return nil, fmt.Errorf("error generating network client: %v", err)
+	}
+
 	return &Client{
 		ctx:           ctx,
 		pClient:       client,
@@ -144,6 +150,7 @@ func NewClient(ctx context.Context, endpoint string, region string, secret *core
 		storageClient: storageClient,
 		computeClient: computeClient,
 		imageClient:   imageClient,
+		networkClient: networkClient,
 		options:       options,
 	}, nil
 }
@@ -181,7 +188,7 @@ func (c *Client) Verify() error {
 func (c *Client) PreFlightChecks(vm *migration.VirtualMachineImport) (err error) {
 	// Check the source network mappings.
 	for _, nm := range vm.Spec.Mapping {
-		_, err := networks.Get(c.computeClient, nm.SourceNetwork).Extract()
+		_, err := networks.Get(c.networkClient, nm.SourceNetwork).Extract()
 		if err != nil {
 			return fmt.Errorf("error getting source network '%s': %v", nm.SourceNetwork, err)
 		}
