@@ -155,7 +155,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 
 	vmObj, err = c.findVM(vm.Spec.Folder, vm.Spec.VirtualMachineName)
 	if err != nil {
-		return fmt.Errorf("error finding vm in ExportVirtualMacine: %v", err)
+		return fmt.Errorf("error finding vm in ExportVirtualMachine: %v", err)
 	}
 
 	lease, err = vmObj.Export(c.ctx)
@@ -178,6 +178,17 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 				i.Path = vm.Name + "-" + vm.Namespace + "-" + i.Path
 			}
 
+			logrus.WithFields(logrus.Fields{
+				"name":                    vm.Name,
+				"namespace":               vm.Namespace,
+				"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+				"spec.sourceCluster.name": vm.Spec.SourceCluster.Name,
+				"spec.sourceCluster.kind": vm.Spec.SourceCluster.Kind,
+				"deviceId":                i.DeviceId,
+				"path":                    i.Path,
+				"size":                    i.Size,
+			}).Info("Downloading an image")
+
 			exportPath := filepath.Join(tmpPath, i.Path)
 			err = lease.DownloadFile(c.ctx, exportPath, i, soap.DefaultDownload)
 			if err != nil {
@@ -188,6 +199,17 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 				DiskSize: i.Size,
 				BusType:  adapterType(i.DeviceId),
 			})
+		} else {
+			logrus.WithFields(logrus.Fields{
+				"name":                    vm.Name,
+				"namespace":               vm.Namespace,
+				"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+				"spec.sourceCluster.name": vm.Spec.SourceCluster.Name,
+				"spec.sourceCluster.kind": vm.Spec.SourceCluster.Kind,
+				"deviceId":                i.DeviceId,
+				"path":                    i.Path,
+				"size":                    i.Size,
+			}).Info("Skipping an image")
 		}
 	}
 
@@ -204,7 +226,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 	// once the disks are converted this needs to be updated to ".img"
 	// spec for how download_url is generated
 	// 				Spec: harvesterv1beta1.VirtualMachineImageSpec{
-	//					DisplayName: fmt.Sprintf("vm-import-%s-%s", vm.Name, d.Name),
+	//					DisplayName: fmt.Sprintf("vm-import-%s", d.Name),
 	//					URL: fmt.Sprintf("http://%s:%d/%s.img", server.Address(), server.DefaultPort(), d.Name),
 	//				},
 
@@ -216,7 +238,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 		destFile := filepath.Join(server.TempDir(), rawDiskName)
 		err = qemu.ConvertVMDKtoRAW(sourceFile, destFile)
 		if err != nil {
-			return fmt.Errorf("error during conversion of vmdk to raw disk %v", err)
+			return fmt.Errorf("error during conversion of vmdk to raw disk: %v", err)
 		}
 		// update fields to reflect final location of raw image file
 		vm.Status.DiskImportStatus[i].DiskLocalPath = server.TempDir()
@@ -270,9 +292,10 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 	if err != nil {
 		return nil, fmt.Errorf("error quering vm in GenerateVirtualMachine: %v", err)
 	}
+
 	newVM := &kubevirt.VirtualMachine{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      vm.Spec.VirtualMachineName,
+			Name:      vm.Status.DefiniteVirtualMachineName,
 			Namespace: vm.Namespace,
 		},
 	}
@@ -292,7 +315,7 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		Template: &kubevirt.VirtualMachineInstanceTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					"harvesterhci.io/vmName": vm.Spec.VirtualMachineName,
+					"harvesterhci.io/vmName": vm.Status.DefiniteVirtualMachineName,
 				},
 			},
 			Spec: kubevirt.VirtualMachineInstanceSpec{
@@ -469,4 +492,10 @@ func adapterType(deviceID string) kubevirt.DiskBus {
 		return kubevirt.DiskBusSCSI
 	}
 	return kubevirt.DiskBusSATA
+}
+
+// SanitizeVirtualMachineImport is used to sanitize the VirtualMachineImport object.
+func (c *Client) SanitizeVirtualMachineImport(vm *migration.VirtualMachineImport) error {
+	vm.Status.DefiniteVirtualMachineName = vm.Spec.VirtualMachineName
+	return nil
 }

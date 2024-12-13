@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +28,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	kubevirt "kubevirt.io/api/core/v1"
 
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
@@ -49,6 +51,7 @@ type Client struct {
 	storageClient *gophercloud.ServiceClient
 	computeClient *gophercloud.ServiceClient
 	imageClient   *gophercloud.ServiceClient
+	networkClient *gophercloud.ServiceClient
 }
 
 type ExtendedVolume struct {
@@ -136,6 +139,11 @@ func NewClient(ctx context.Context, endpoint string, region string, secret *core
 		return nil, fmt.Errorf("error generating image client: %v", err)
 	}
 
+	networkClient, err := openstack.NewNetworkV2(client, endPointOpts)
+	if err != nil {
+		return nil, fmt.Errorf("error generating network client: %v", err)
+	}
+
 	return &Client{
 		ctx:           ctx,
 		pClient:       client,
@@ -143,6 +151,7 @@ func NewClient(ctx context.Context, endpoint string, region string, secret *core
 		storageClient: storageClient,
 		computeClient: computeClient,
 		imageClient:   imageClient,
+		networkClient: networkClient,
 	}, nil
 }
 
@@ -177,12 +186,36 @@ func (c *Client) Verify() error {
 }
 
 func (c *Client) PreFlightChecks(vm *migration.VirtualMachineImport) (err error) {
+	// Check the source network mappings.
 	for _, nm := range vm.Spec.Mapping {
-		_, err := networks.Get(c.computeClient, nm.SourceNetwork).Extract()
+		_, err := networks.Get(c.networkClient, nm.SourceNetwork).Extract()
 		if err != nil {
 			return fmt.Errorf("error getting source network '%s': %v", nm.SourceNetwork, err)
 		}
 	}
+
+	// Make sure the `harvesterhci.io/imageDisplayName` label set to the
+	// VirtualMachineImages meets the DNS-1123 standard.
+	// Note, in order to be able to validate the label content, we must
+	// temporarily bring forward the step `SanitizeVirtualMachineImport`,
+	// which is actually carried out after the preflight checks, as we
+	// need the definitive VM name here.
+	sanitizedVM := vm.DeepCopy()
+	if err := c.SanitizeVirtualMachineImport(sanitizedVM); err != nil {
+		return fmt.Errorf("failed to sanitize the object (Kind=%s, Name=%s) during preflight check: %v",
+			sanitizedVM.Kind, sanitizedVM.Name, err)
+	}
+	vmObj, err := c.findVM(sanitizedVM.Spec.VirtualMachineName)
+	if err != nil {
+		return err
+	}
+	for vIndex := range vmObj.AttachedVolumes {
+		imageDisplayName := fmt.Sprintf("vm-import-%s-%d.img", sanitizedVM.Status.DefiniteVirtualMachineName, vIndex)
+		if errs := validation.IsDNS1123Label(imageDisplayName); len(errs) != 0 {
+			return fmt.Errorf("the VM display image name '%s' will not be RFC 1123 compliant: %v", imageDisplayName, errs)
+		}
+	}
+
 	return nil
 }
 
@@ -243,6 +276,15 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			return fmt.Errorf("timeout waiting for volume %s to be available: %v", volObj.ID, err)
 		}
 
+		logrus.WithFields(logrus.Fields{
+			"name":                    vm.Name,
+			"namespace":               vm.Namespace,
+			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+			"spec.sourceCluster.name": vm.Spec.SourceCluster.Name,
+			"spec.sourceCluster.kind": vm.Spec.SourceCluster.Kind,
+			"attachedVolumeID":        v.ID,
+		}).Info("Creating a new image from a volume")
+
 		volImage, err := volumeactions.UploadImage(c.storageClient, volObj.ID, volumeactions.UploadImageOpts{
 			ImageName:  imageName,
 			DiskFormat: "raw",
@@ -270,12 +312,21 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			time.Sleep(defaultInterval)
 		}
 
+		logrus.WithFields(logrus.Fields{
+			"name":                    vm.Name,
+			"namespace":               vm.Namespace,
+			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+			"spec.sourceCluster.name": vm.Spec.SourceCluster.Name,
+			"spec.sourceCluster.kind": vm.Spec.SourceCluster.Kind,
+			"imageID":                 volImage.ImageID,
+		}).Info("Downloading an image")
+
 		contents, err := imagedata.Download(c.imageClient, volImage.ImageID).Extract()
 		if err != nil {
 			return err
 		}
 
-		rawImageFileName := fmt.Sprintf("%s-%d.img", vmObj.Name, vIndex)
+		rawImageFileName := fmt.Sprintf("%s-%d.img", vm.Status.DefiniteVirtualMachineName, vIndex)
 
 		logrus.WithFields(logrus.Fields{
 			"name":                    vm.Name,
@@ -316,7 +367,7 @@ func (c *Client) PowerOffVirtualMachine(vm *migration.VirtualMachineImport) erro
 	if err != nil {
 		return fmt.Errorf("error generating compute client during poweroffvirtualmachine: %v", err)
 	}
-	uuid, err := c.checkOrGetUUID(vm.Spec.VirtualMachineName)
+	serverUUID, err := c.checkOrGetUUID(vm.Spec.VirtualMachineName)
 	if err != nil {
 		return err
 	}
@@ -326,13 +377,12 @@ func (c *Client) PowerOffVirtualMachine(vm *migration.VirtualMachineImport) erro
 		return err
 	}
 	if !ok {
-		return startstop.Stop(computeClient, uuid).ExtractErr()
+		return startstop.Stop(computeClient, serverUUID).ExtractErr()
 	}
 	return nil
 }
 
 func (c *Client) IsPoweredOff(vm *migration.VirtualMachineImport) (bool, error) {
-
 	s, err := c.findVM(vm.Spec.VirtualMachineName)
 	if err != nil {
 		return false, err
@@ -370,7 +420,7 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 
 	newVM := &kubevirt.VirtualMachine{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      vm.Spec.VirtualMachineName,
+			Name:      vm.Status.DefiniteVirtualMachineName,
 			Namespace: vm.Namespace,
 		},
 	}
@@ -387,7 +437,7 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		Template: &kubevirt.VirtualMachineInstanceTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					"harvesterhci.io/vmName": vm.Spec.VirtualMachineName,
+					"harvesterhci.io/vmName": vm.Status.DefiniteVirtualMachineName,
 				},
 			},
 			Spec: kubevirt.VirtualMachineInstanceSpec{
@@ -694,6 +744,28 @@ func generateNetworkInfo(info map[string]interface{}) ([]networkInfo, error) {
 		uniqueNetworks = append(uniqueNetworks, v)
 	}
 	return uniqueNetworks, nil
+}
+
+// SanitizeVirtualMachineImport is used to sanitize the VirtualMachineImport object.
+func (c *Client) SanitizeVirtualMachineImport(vm *migration.VirtualMachineImport) error {
+	// If the given `spec.virtualMachineName` is a UUID, then we need to
+	// get the name from the OpenStack server object.
+	parsedUUID, err := uuid.Parse(vm.Spec.VirtualMachineName)
+	if err == nil {
+		vmObj, err := c.findVM(parsedUUID.String())
+		if err != nil {
+			return err
+		}
+		vm.Status.DefiniteVirtualMachineName = vmObj.Name
+	} else {
+		vm.Status.DefiniteVirtualMachineName = vm.Spec.VirtualMachineName
+	}
+
+	// Note, server objects might have upper case characters in OpenStack,
+	// so we need to convert them to lower case to be RFC 1123 compliant.
+	vm.Status.DefiniteVirtualMachineName = strings.ToLower(vm.Status.DefiniteVirtualMachineName)
+
+	return nil
 }
 
 // writeRawImageFile Download and write the raw image file to the specified path in chunks of 32KiB.
