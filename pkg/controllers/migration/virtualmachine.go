@@ -407,7 +407,8 @@ func (h *virtualMachineHandler) generateVMO(vm *migration.VirtualMachineImport) 
 
 	if source.GetKind() == strings.ToLower("openstacksource") {
 		endpoint, region := source.GetConnectionInfo()
-		return openstack.NewClient(h.ctx, endpoint, region, secret)
+		options := source.GetOptions().(migration.OpenstackSourceOptions)
+		return openstack.NewClient(h.ctx, endpoint, region, secret, options)
 	}
 
 	return nil, fmt.Errorf("unsupport source kind")

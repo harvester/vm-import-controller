@@ -36,7 +36,10 @@ func TestMain(t *testing.M) {
 		logrus.Fatal(err)
 	}
 
-	c, err = NewClient(context.TODO(), endpoint, region, s)
+	source := migration.OpenstackSource{}
+	options := source.GetOptions().(migration.OpenstackSourceOptions)
+
+	c, err = NewClient(context.TODO(), endpoint, region, s, options)
 	if err != nil {
 		logrus.Fatal(err)
 	}
@@ -137,4 +140,63 @@ func Test_generateNetworkInfo(t *testing.T) {
 	assert.NoError(err, "expected no error while generating network info")
 	assert.Len(vmInterfaceDetails, 2, "expected to find 2 interfaces only")
 
+}
+
+func Test_ClientOptions(t *testing.T) {
+	assert := require.New(t)
+	assert.Equal(c.options.UploadImageRetryCount, migration.OpenstackDefaultRetryCount)
+	assert.Equal(c.options.UploadImageRetryDelay, migration.OpenstackDefaultRetryDelay)
+}
+
+func Test_SourceGetOptions(t *testing.T) {
+	assert := require.New(t)
+	testCases := []struct {
+		desc     string
+		options  migration.OpenstackSourceOptions
+		expected migration.OpenstackSourceOptions
+	}{
+		{
+			desc: "custom count and delay",
+			options: migration.OpenstackSourceOptions{
+				UploadImageRetryCount: 25,
+				UploadImageRetryDelay: 15,
+			},
+			expected: migration.OpenstackSourceOptions{
+				UploadImageRetryCount: 25,
+				UploadImageRetryDelay: 15,
+			},
+		},
+		{
+			desc: "custom count and default delay",
+			options: migration.OpenstackSourceOptions{
+				UploadImageRetryCount: 100,
+			},
+			expected: migration.OpenstackSourceOptions{
+				UploadImageRetryCount: 100,
+				UploadImageRetryDelay: migration.OpenstackDefaultRetryDelay,
+			},
+		},
+		{
+			desc: "default count and custom delay",
+			options: migration.OpenstackSourceOptions{
+				UploadImageRetryDelay: 50,
+			},
+			expected: migration.OpenstackSourceOptions{
+				UploadImageRetryCount: migration.OpenstackDefaultRetryCount,
+				UploadImageRetryDelay: 50,
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		source := migration.OpenstackSource{
+			Spec: migration.OpenstackSourceSpec{
+				OpenstackSourceOptions: tc.options,
+			},
+		}
+		options := source.GetOptions().(migration.OpenstackSourceOptions)
+
+		assert.Equal(options.UploadImageRetryCount, tc.expected.UploadImageRetryCount, tc.desc)
+		assert.Equal(options.UploadImageRetryDelay, tc.expected.UploadImageRetryDelay, tc.desc)
+	}
 }
