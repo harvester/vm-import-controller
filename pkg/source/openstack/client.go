@@ -393,7 +393,7 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 			Spec: kubevirt.VirtualMachineInstanceSpec{
 				Domain: kubevirt.DomainSpec{
 					CPU: &kubevirt.CPU{
-						Cores:   uint32(flavorObj.VCPUs),
+						Cores:   uint32(flavorObj.VCPUs), // nolint:gosec
 						Sockets: uint32(1),
 						Threads: 1,
 					},

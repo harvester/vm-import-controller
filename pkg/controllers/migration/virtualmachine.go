@@ -534,7 +534,7 @@ func (h *virtualMachineHandler) createVirtualMachine(vm *migration.VirtualMachin
 		diskOrder++ // Disk order cant be 0, so need to kick things off from 1
 		disks = append(disks, kubevirt.Disk{
 			Name:      fmt.Sprintf("disk-%d", i),
-			BootOrder: &[]uint{uint(diskOrder)}[0],
+			BootOrder: &[]uint{uint(diskOrder)}[0], // nolint:gosec
 			DiskDevice: kubevirt.DiskDevice{
 				Disk: &kubevirt.DiskTarget{
 					Bus: v.BusType,
