@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	capiformat "sigs.k8s.io/cluster-api/util/labels/format"
+
 	"github.com/harvester/vm-import-controller/pkg/apis/common"
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	migrationController "github.com/harvester/vm-import-controller/pkg/generated/controllers/migration.harvesterhci.io/v1beta1"
@@ -413,7 +415,6 @@ func (h *virtualMachineHandler) triggerExport(vm *migration.VirtualMachineImport
 
 // generateVMO is a wrapper to generate a VirtualMachineOperations client
 func (h *virtualMachineHandler) generateVMO(vm *migration.VirtualMachineImport) (VirtualMachineOperations, error) {
-
 	source, err := h.generateSource(vm)
 	if err != nil {
 		return nil, fmt.Errorf("error generating migration interface: %v", err)
@@ -696,6 +697,14 @@ func (h *virtualMachineHandler) findAndCreatePVC(vm *migration.VirtualMachineImp
 				},
 			}
 
+			logrus.WithFields(logrus.Fields{
+				"name":                  pvcObj.Name,
+				"namespace":             pvcObj.Namespace,
+				"annotations":           pvcObj.Annotations,
+				"spec.storageClassName": *pvcObj.Spec.StorageClassName,
+				"spec.volumeMode":       *pvcObj.Spec.VolumeMode,
+			}).Info("Creating a new PVC")
+
 			_, err = h.pvc.Create(pvcObj)
 			if err != nil {
 				return err
@@ -752,22 +761,28 @@ func generateAnnotations(vm *migration.VirtualMachineImport, vmi *harvesterv1bet
 }
 
 func (h *virtualMachineHandler) checkAndCreateVirtualMachineImage(vm *migration.VirtualMachineImport, d migration.DiskInfo) (*harvesterv1beta1.VirtualMachineImage, error) {
+	displayName := fmt.Sprintf("vm-import-%s-%s", vm.Name, d.Name)
+
+	// Make sure the label meets the standards for a Kubernetes label value.
+	labelDisplayName := capiformat.MustFormatValue(displayName)
+
+	// Check if the VirtualMachineImage object already exists.
 	imageList, err := h.vmi.Cache().List(vm.Namespace, labels.SelectorFromSet(map[string]string{
-		labelImageDisplayName: fmt.Sprintf("vm-import-%s-%s", vm.Name, d.Name),
+		labelImageDisplayName: labelDisplayName,
 	}))
 	if err != nil {
 		return nil, err
 	}
 
-	if len(imageList) > 1 {
-		return nil, fmt.Errorf("unexpected error: found %d images with label %s=%s, only expected to find one", len(imageList), labelImageDisplayName, fmt.Sprintf("vm-import-%s-%s", vm.Name, d.Name))
+	numImages := len(imageList)
+	if numImages > 1 {
+		return nil, fmt.Errorf("found %d Harvester VirtualMachineImages with label '%s=%s', only expected to find one", numImages, labelImageDisplayName, labelDisplayName)
 	}
-
-	if len(imageList) == 1 {
+	if numImages == 1 {
 		return imageList[0], nil
 	}
 
-	// no image found create a new VMI and return object
+	// No VirtualMachineImage object found. Create a new one and return the object.
 	vmi := &harvesterv1beta1.VirtualMachineImage{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "image-",
@@ -781,11 +796,15 @@ func (h *virtualMachineHandler) checkAndCreateVirtualMachineImage(vm *migration.
 				},
 			},
 			Labels: map[string]string{
-				labelImageDisplayName: fmt.Sprintf("vm-import-%s-%s", vm.Name, d.Name),
+				// Set the `harvesterhci.io/imageDisplayName` label to be
+				// able to search for the `VirtualMachineImage` object during
+				// the reconciliation phase. See code above at the beginning
+				// of this function.
+				labelImageDisplayName: labelDisplayName,
 			},
 		},
 		Spec: harvesterv1beta1.VirtualMachineImageSpec{
-			DisplayName: fmt.Sprintf("vm-import-%s-%s", vm.Name, d.Name),
+			DisplayName: displayName,
 			URL:         fmt.Sprintf("http://%s:%d/%s", server.Address(), server.DefaultPort(), d.Name),
 			SourceType:  "download",
 		},
@@ -797,6 +816,15 @@ func (h *virtualMachineHandler) checkAndCreateVirtualMachineImage(vm *migration.
 			"harvesterhci.io/storageClassName": vm.Spec.StorageClass,
 		}
 	}
+
+	logrus.WithFields(logrus.Fields{
+		"generateName":     vmi.GenerateName,
+		"namespace":        vmi.Namespace,
+		"annotations":      vmi.Annotations,
+		"labels":           vmi.Labels,
+		"ownerReferences":  vmi.OwnerReferences,
+		"spec.displayName": vmi.Spec.DisplayName,
+	}).Info("Creating a new Harvester VirtualMachineImage")
 
 	vmiObj, err := h.vmi.Create(vmi)
 	if err != nil {
