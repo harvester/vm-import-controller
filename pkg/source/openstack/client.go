@@ -193,7 +193,6 @@ func (c *Client) PreFlightChecks(vm *migration.VirtualMachineImport) (err error)
 		if err != nil {
 			return fmt.Errorf("error while generating all pages during querying source network '%s': %v", nm.SourceNetwork, err)
 		}
-
 		ok, err := allPgs.IsEmpty()
 		if err != nil {
 			return fmt.Errorf("error while checking if pages were empty during querying source network '%s': %v", nm.SourceNetwork, err)
@@ -315,14 +314,14 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			return err
 		}
 
-		rawImageFileName := fmt.Sprintf("%s-%d.img", vmObj.Name, vIndex)
+		rawImageFileName := generateRawImageFileName(vm.Status.ImportedVirtualMachineName, vIndex)
 
 		logrus.WithFields(logrus.Fields{
 			"name":                    vm.Name,
 			"namespace":               vm.Namespace,
 			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
 			"volume.imageID":          volImage.ImageID,
-		}).Info("Downloading raw image")
+		}).Info("Downloading RAW image")
 		err = writeRawImageFile(filepath.Join(server.TempDir(), rawImageFileName), contents)
 		if err != nil {
 			return err
@@ -764,4 +763,9 @@ func writeRawImageFile(name string, src io.ReadCloser) error {
 
 	_, err = io.Copy(dst, src)
 	return err
+}
+
+// generateRawImageFileName Generate the raw image file name based on the VM name and index of the attached volume.
+func generateRawImageFileName(vmName string, index int) string {
+	return fmt.Sprintf("%s-%d.img", vmName, index)
 }
