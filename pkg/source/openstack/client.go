@@ -349,7 +349,10 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			"namespace":               vm.Namespace,
 			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
 			"volume.imageID":          volImage.ImageID,
+<<<<<<< HEAD
 			"rawImageFileName":        rawImageFileName,
+=======
+>>>>>>> 4659913 (Make sure the label `harvesterhci.io/imageDisplayName` is valid)
 		}).Info("Downloading RAW image")
 		err = writeRawImageFile(filepath.Join(server.TempDir(), rawImageFileName), contents)
 		if err != nil {
