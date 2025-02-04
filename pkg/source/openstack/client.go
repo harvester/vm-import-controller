@@ -398,7 +398,7 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		return nil, fmt.Errorf("error getting firware settings: %v", err)
 	}
 
-	networks, err := generateNetworkInfo(vmObj.Addresses)
+	networkInfos, err := generateNetworkInfo(vmObj.Addresses)
 	if err != nil {
 		return nil, err
 	}
@@ -451,7 +451,7 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		},
 	}
 
-	mappedNetwork := mapNetworkCards(networks, vm.Spec.Mapping)
+	mappedNetwork := mapNetworkCards(networkInfos, vm.Spec.Mapping)
 	networkConfig := make([]kubevirt.Network, 0, len(mappedNetwork))
 	for i, v := range mappedNetwork {
 		networkConfig = append(networkConfig, kubevirt.Network{
@@ -700,7 +700,7 @@ func (c *Client) ImageFirmwareSettings(instance *servers.Server) (bool, bool, bo
 }
 
 func generateNetworkInfo(info map[string]interface{}) ([]networkInfo, error) {
-	networks := make([]networkInfo, 0)
+	networkInfos := make([]networkInfo, 0)
 	uniqueNetworks := make([]networkInfo, 0)
 	for network, values := range info {
 		valArr, ok := values.([]interface{})
@@ -712,7 +712,7 @@ func generateNetworkInfo(info map[string]interface{}) ([]networkInfo, error) {
 			if !ok {
 				return nil, fmt.Errorf("error asserting network array element into map[string]string")
 			}
-			networks = append(networks, networkInfo{
+			networkInfos = append(networkInfos, networkInfo{
 				NetworkName: network,
 				MAC:         valMap["OS-EXT-IPS-MAC:mac_addr"].(string),
 			})
@@ -721,7 +721,7 @@ func generateNetworkInfo(info map[string]interface{}) ([]networkInfo, error) {
 	// in case of interfaces with ipv6 and ipv4 addresses they are reported twice, so we need to dedup them
 	// based on a mac address
 	networksMap := make(map[string]networkInfo)
-	for _, v := range networks {
+	for _, v := range networkInfos {
 		networksMap[v.MAC] = v
 	}
 
