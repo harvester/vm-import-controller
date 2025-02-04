@@ -42,15 +42,17 @@ func (h *vmwareHandler) OnSourceChange(_ string, v *migration.VmwareSource) (*mi
 		"kind":      v.Kind,
 		"name":      v.Name,
 		"namespace": v.Namespace,
-	}).Info("Reconciling migration source")
+	}).Info("Reconciling source")
+
 	if v.Status.Status != migration.ClusterReady {
 		secretObj, err := h.secret.Get(v.Spec.Credentials.Namespace, v.Spec.Credentials.Name, metav1.GetOptions{})
 		if err != nil {
 			return v, fmt.Errorf("error looking up secret for vmware migration: %v", err)
 		}
+
 		client, err := vmware.NewClient(h.ctx, v.Spec.EndpointAddress, v.Spec.Datacenter, secretObj)
 		if err != nil {
-			return v, fmt.Errorf("error generating vmware client for vmware migration: %s: %v", v.Name, err)
+			return v, fmt.Errorf("error generating vmware client for vmware migration '%s': %v", v.Name, err)
 		}
 
 		err = client.Verify()
