@@ -124,12 +124,19 @@ func (c *Client) Verify() error {
 }
 
 func (c *Client) PreFlightChecks(vm *migration.VirtualMachineImport) (err error) {
+	// Check the source network mappings.
 	f := find.NewFinder(c.Client.Client, true)
 	dc := c.dc
 	if !strings.HasPrefix(c.dc, "/") {
 		dc = fmt.Sprintf("/%s", c.dc)
 	}
 	for _, nm := range vm.Spec.Mapping {
+		logrus.WithFields(logrus.Fields{
+			"name":          vm.Name,
+			"namespace":     vm.Namespace,
+			"sourceNetwork": nm.SourceNetwork,
+		}).Info("Checking the source network as part of the preflight checks")
+
 		// The path looks like `/<datacenter>/network/<network-name>`.
 		path := filepath.Join(dc, "/network", nm.SourceNetwork)
 		_, err := f.Network(c.ctx, path)
@@ -137,6 +144,7 @@ func (c *Client) PreFlightChecks(vm *migration.VirtualMachineImport) (err error)
 			return fmt.Errorf("error getting source network '%s': %v", nm.SourceNetwork, err)
 		}
 	}
+
 	return nil
 }
 
