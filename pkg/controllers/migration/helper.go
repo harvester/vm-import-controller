@@ -45,9 +45,13 @@ func evaluateDiskImportStatus(diskImportStatus []migration.DiskInfo) *migration.
 
 func (h *virtualMachineHandler) reconcileDiskImageStatus(vm *migration.VirtualMachineImport) (*migration.VirtualMachineImport, error) {
 	orgStatus := vm.Status.DeepCopy()
+
 	// If VM has no disks associated ignore the VM
 	if len(orgStatus.DiskImportStatus) == 0 {
-		logrus.Errorf("Imported VM %s in namespace %s, has no disks, being marked as invalid and will be ignored", vm.Name, vm.Namespace)
+		logrus.WithFields(logrus.Fields{
+			"name":      vm.Name,
+			"namespace": vm.Namespace,
+		}).Error("The imported VM has no disks, being marked as invalid and will be ignored")
 		vm.Status.Status = migration.VirtualMachineImportInvalid
 		return h.importVM.UpdateStatus(vm)
 
