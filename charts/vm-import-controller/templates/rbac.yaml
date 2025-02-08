@@ -41,7 +41,13 @@ rules:
   - persistentvolumeclaims
   verbs:
   - "*"
-
+- apiGroups:                                                                                                                                          
+  - storage.k8s.io                                                                                                                                    
+  resources:                                                                                                                                          
+  - "*"                                                                                                                                               
+  verbs:                                                                                                                                              
+  - list                                                                                                                                              
+  - watch  
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
