@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 
@@ -199,4 +200,26 @@ func Test_SourceGetOptions(t *testing.T) {
 		assert.Equal(options.UploadImageRetryCount, tc.expected.UploadImageRetryCount, tc.desc)
 		assert.Equal(options.UploadImageRetryDelay, tc.expected.UploadImageRetryDelay, tc.desc)
 	}
+}
+
+func Test_ExtendedServer(t *testing.T) {
+	assert := require.New(t)
+
+	var dejson any
+	sejson := []byte(`{"server": {"id": "b3693d06-8135-4c7c-b3ea-d37b2cc6fb8f", "name": "cirros-tiny", "status": "SHUTOFF", "tenant_id": "88c800f12d7d4e4e93b2e2883aed1bf5", "user_id": "94ebd4b2c5a140dd9bc20dc5139d6823", "metadata": {}, "hostId": "d44ae638ea333eefe401ae01c9dec9add9ed7b6cad1024a3a220d1f4", "image": "", "flavor": {"id": "1", "links": [{"rel": "bookmark", "href": "http://48.151.623.42/compute/flavors/1"}]}, "created": "2025-02-18T17:07:24Z", "updated": "2025-02-18T17:25:13Z", "addresses": {"shared": [{"version": 4, "addr": "192.168.233.13", "OS-EXT-IPS:type": "fixed", "OS-EXT-IPS-MAC:mac_addr": "fa:16:3e:25:90:74"}]}, "accessIPv4": "", "accessIPv6": "", "links": [{"rel": "self", "href": "http://48.151.623.42/compute/v2.1/servers/b3693d06-8135-4c7c-b3ea-d37b2cc6fb8f"}, {"rel": "bookmark", "href": "http://48.151.623.42/compute/servers/b3693d06-8135-4c7c-b3ea-d37b2cc6fb8f"}], "OS-DCF:diskConfig": "AUTO", "OS-EXT-AZ:availability_zone": "nova", "config_drive": "", "key_name": null, "OS-SRV-USG:launched_at": "2025-02-18T17:08:02.000000", "OS-SRV-USG:terminated_at": null, "OS-EXT-SRV-ATTR:host": "opnstk-server-vm", "OS-EXT-SRV-ATTR:instance_name": "instance-00000002", "OS-EXT-SRV-ATTR:hypervisor_hostname": "opnstk-server-vm", "OS-EXT-SRV-ATTR:reservation_id": "r-j7s0gpwg", "OS-EXT-SRV-ATTR:launch_index": 0, "OS-EXT-SRV-ATTR:hostname": "cirros-test", "OS-EXT-SRV-ATTR:kernel_id": "", "OS-EXT-SRV-ATTR:ramdisk_id": "", "OS-EXT-SRV-ATTR:root_device_name": "/dev/vda", "OS-EXT-SRV-ATTR:user_data": null, "OS-EXT-STS:task_state": null, "OS-EXT-STS:vm_state": "stopped", "OS-EXT-STS:power_state": 4, "os-extended-volumes:volumes_attached": [{"id": "e6565b2e-6f99-45e8-9278-fd4b4b35a1ea", "delete_on_termination": false}], "host_status": "UP", "locked": false, "description": "test foo bar"}}`)
+	err := json.Unmarshal(sejson, &dejson)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sr := servers.GetResult{}
+	sr.Body = dejson
+
+	var s ExtendedServer
+	err = sr.ExtractInto(&s)
+
+	assert.NoError(err, "expect no error during extract")
+	assert.Equal(s.Name, "cirros-tiny", "expect name to be 'cirros-tiny'")
+	assert.Equal(s.Status, "", "expect status to be 'SHUTOFF'")
+	assert.Equal(s.Description, "test foo bar", "expect description to be 'test foo bar'")
 }

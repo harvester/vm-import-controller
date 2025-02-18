@@ -13,17 +13,16 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/gophercloud/gophercloud"
-	"github.com/gophercloud/gophercloud/openstack"
-	"github.com/gophercloud/gophercloud/openstack/blockstorage/extensions/volumeactions"
-	"github.com/gophercloud/gophercloud/openstack/blockstorage/v2/volumes"
-	"github.com/gophercloud/gophercloud/openstack/blockstorage/v3/snapshots"
-	"github.com/gophercloud/gophercloud/openstack/compute/v2/extensions/startstop"
-	"github.com/gophercloud/gophercloud/openstack/compute/v2/flavors"
-	"github.com/gophercloud/gophercloud/openstack/compute/v2/servers"
-	"github.com/gophercloud/gophercloud/openstack/imageservice/v2/imagedata"
-	"github.com/gophercloud/gophercloud/openstack/imageservice/v2/images"
-	"github.com/gophercloud/gophercloud/openstack/networking/v2/networks"
+	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack"
+	"github.com/gophercloud/gophercloud/v2/openstack/blockstorage/v2/volumes"
+	"github.com/gophercloud/gophercloud/v2/openstack/blockstorage/v3/snapshots"
+	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/flavors"
+	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
+	"github.com/gophercloud/gophercloud/v2/openstack/image/v2/imagedata"
+	"github.com/gophercloud/gophercloud/v2/openstack/image/v2/images"
+	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/networks"
+	"github.com/gophercloud/gophercloud/v2/openstack/utils"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -37,8 +36,9 @@ import (
 const (
 	NotUniqueName         = "notUniqueName"
 	NotServerFound        = "noServerFound"
-	pollingTimeout        = 2 * 60 * 60 // in seconds
+	pollingTimeout        = 2 * 60 * 60 * time.Second
 	annotationDescription = "field.cattle.io/description"
+	computeMicroversion   = "2.19"
 )
 
 type Client struct {
@@ -62,7 +62,12 @@ type ExtendedVolume struct {
 // - https://docs.openstack.org/api-ref/compute/?expanded=list-all-metadata-detail%2Ccreate-server-detail#show-server-details
 type ExtendedServer struct {
 	servers.Server
-	Description string `json:"description,omitempty"`
+	ServerDescription
+}
+
+type ServerDescription struct {
+	// This requires microversion 2.19 or later.
+	Description string `json:"description"`
 }
 
 // NewClient will generate a GopherCloud client
@@ -117,7 +122,7 @@ func NewClient(ctx context.Context, endpoint string, region string, secret *core
 		return nil, fmt.Errorf("error generating new client: %v", err)
 	}
 	client.HTTPClient.Transport = tr
-	err = openstack.Authenticate(client, authOpts)
+	err = openstack.Authenticate(ctx, client, authOpts)
 	if err != nil {
 		return nil, fmt.Errorf("error authenticated client: %v", err)
 	}
@@ -132,7 +137,24 @@ func NewClient(ctx context.Context, endpoint string, region string, secret *core
 		return nil, fmt.Errorf("error generating compute client: %v", err)
 	}
 
-	imageClient, err := openstack.NewImageServiceV2(client, endPointOpts)
+	// Try to set the `compute` microversion to 2.19 to get the server description.
+	// https://docs.openstack.org/nova/latest/reference/api-microversion-history.html
+	supportedMicroversions, err := utils.GetSupportedMicroversions(ctx, computeClient)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch supported microversions from compute client: %v", err)
+	}
+	supported, err := supportedMicroversions.IsSupported(computeMicroversion)
+	if err == nil && supported {
+		logrus.WithFields(logrus.Fields{
+			"type":            computeClient.Type,
+			"minMicroversion": fmt.Sprintf("%d.%d", supportedMicroversions.MinMajor, supportedMicroversions.MinMinor),
+			"maxMicroversion": fmt.Sprintf("%d.%d", supportedMicroversions.MaxMajor, supportedMicroversions.MaxMinor),
+			"microversion":    computeMicroversion,
+		}).Debug("Setting custom microversion")
+		computeClient.Microversion = computeMicroversion
+	}
+
+	imageClient, err := openstack.NewImageV2(client, endPointOpts)
 	if err != nil {
 		return nil, fmt.Errorf("error generating image client: %v", err)
 	}
@@ -156,7 +178,7 @@ func NewClient(ctx context.Context, endpoint string, region string, secret *core
 
 func (c *Client) Verify() error {
 	pg := servers.List(c.computeClient, servers.ListOpts{})
-	allPg, err := pg.AllPages()
+	allPg, err := pg.AllPages(c.ctx)
 	if err != nil {
 		return fmt.Errorf("error generating all pages: %v", err)
 	}
@@ -189,7 +211,7 @@ func (c *Client) PreFlightChecks(vm *migration.VirtualMachineImport) (err error)
 		}).Info("Checking the source network as part of the preflight checks")
 
 		pgr := networks.List(c.networkClient, networks.ListOpts{Name: nm.SourceNetwork})
-		allPgs, err := pgr.AllPages()
+		allPgs, err := pgr.AllPages(c.ctx)
 		if err != nil {
 			return fmt.Errorf("error while generating all pages during querying source network '%s': %v", nm.SourceNetwork, err)
 		}
@@ -215,7 +237,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 		imageName := fmt.Sprintf("import-controller-%s-%d", vm.Spec.VirtualMachineName, vIndex)
 
 		// create snapshot for volume
-		snapInfo, err := snapshots.Create(c.storageClient, snapshots.CreateOpts{
+		snapInfo, err := snapshots.Create(c.ctx, c.storageClient, snapshots.CreateOpts{
 			Name:     imageName,
 			VolumeID: v.ID,
 			Force:    true,
@@ -235,14 +257,17 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			"snapshot.size":           snapInfo.Size,
 		}).Info("Waiting for snapshot to be available")
 
-		if err := snapshots.WaitForStatus(c.storageClient, snapInfo.ID, "available", pollingTimeout); err != nil {
+		ctxWithTimeout1, cancel1 := context.WithTimeout(c.ctx, pollingTimeout)
+		defer cancel1()
+
+		if err := snapshots.WaitForStatus(ctxWithTimeout1, c.storageClient, snapInfo.ID, "available"); err != nil {
 			return fmt.Errorf("timeout waiting for snapshot %s to be available: %v", snapInfo.ID, err)
 		}
 
-		volObj, err := volumes.Create(c.storageClient, volumes.CreateOpts{
+		volObj, err := volumes.Create(c.ctx, c.storageClient, volumes.CreateOpts{
 			SnapshotID: snapInfo.ID,
 			Size:       snapInfo.Size,
-		}).Extract()
+		}, nil).Extract()
 		if err != nil {
 			return err
 		}
@@ -260,7 +285,10 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			"retryDelay":              c.options.UploadImageRetryDelay,
 		}).Info("Waiting for volume to be available")
 
-		if err := volumes.WaitForStatus(c.storageClient, volObj.ID, "available", pollingTimeout); err != nil {
+		ctxWithTimeout2, cancel2 := context.WithTimeout(c.ctx, pollingTimeout)
+		defer cancel2()
+
+		if err := volumes.WaitForStatus(ctxWithTimeout2, c.storageClient, volObj.ID, "available"); err != nil {
 			return fmt.Errorf("timeout waiting for volume %s to be available: %v", volObj.ID, err)
 		}
 
@@ -273,17 +301,17 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			"attachedVolumeID":        v.ID,
 		}).Info("Creating a new image from a volume")
 
-		volImage, err := volumeactions.UploadImage(c.storageClient, volObj.ID, volumeactions.UploadImageOpts{
+		volImage, err := volumes.UploadImage(c.ctx, c.storageClient, volObj.ID, volumes.UploadImageOpts{
 			ImageName:  imageName,
 			DiskFormat: "raw",
 		}).Extract()
 		if err != nil {
-			return err
+			return fmt.Errorf("error while uploading volume image: %v", err)
 		}
 
 		// wait for image to be ready
 		for i := 0; i < c.options.UploadImageRetryCount; i++ {
-			imgObj, err := images.Get(c.imageClient, volImage.ImageID).Extract()
+			imgObj, err := images.Get(c.ctx, c.imageClient, volImage.ImageID).Extract()
 			if err != nil {
 				return fmt.Errorf("error checking status of volume image %s: %v", volImage.ImageID, err)
 			}
@@ -309,9 +337,9 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			"imageID":                 volImage.ImageID,
 		}).Info("Downloading an image")
 
-		contents, err := imagedata.Download(c.imageClient, volImage.ImageID).Extract()
+		contents, err := imagedata.Download(c.ctx, c.imageClient, volImage.ImageID).Extract()
 		if err != nil {
-			return err
+			return fmt.Errorf("error downloading volume image %s: %v", volImage.ImageID, err)
 		}
 
 		rawImageFileName := generateRawImageFileName(vm.Status.ImportedVirtualMachineName, vIndex)
@@ -321,21 +349,22 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			"namespace":               vm.Namespace,
 			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
 			"volume.imageID":          volImage.ImageID,
+			"rawImageFileName":        rawImageFileName,
 		}).Info("Downloading RAW image")
 		err = writeRawImageFile(filepath.Join(server.TempDir(), rawImageFileName), contents)
 		if err != nil {
-			return err
+			return fmt.Errorf("error downloading RAW image %s: %v", rawImageFileName, err)
 		}
 
-		if err := volumes.Delete(c.storageClient, volObj.ID, volumes.DeleteOpts{}).ExtractErr(); err != nil {
+		if err := volumes.Delete(c.ctx, c.storageClient, volObj.ID, volumes.DeleteOpts{}).ExtractErr(); err != nil {
 			return fmt.Errorf("error deleting volume %s: %v", volObj.ID, err)
 		}
 
-		if err := snapshots.Delete(c.storageClient, snapInfo.ID).ExtractErr(); err != nil {
+		if err := snapshots.Delete(c.ctx, c.storageClient, snapInfo.ID).ExtractErr(); err != nil {
 			return fmt.Errorf("error deleting snapshot %s: %v", snapInfo.ID, err)
 		}
 
-		if err := images.Delete(c.imageClient, volImage.ImageID).ExtractErr(); err != nil {
+		if err := images.Delete(c.ctx, c.imageClient, volImage.ImageID).ExtractErr(); err != nil {
 			return fmt.Errorf("error deleting image %s: %v", volImage.ImageID, err)
 		}
 
@@ -361,7 +390,7 @@ func (c *Client) PowerOffVirtualMachine(vm *migration.VirtualMachineImport) erro
 		return err
 	}
 	if !ok {
-		return startstop.Stop(c.computeClient, serverUUID).ExtractErr()
+		return servers.Stop(c.ctx, c.computeClient, serverUUID).ExtractErr()
 	}
 	return nil
 }
@@ -387,7 +416,7 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		return nil, fmt.Errorf("error finding VM in GenerateVirtualMachine: %v", err)
 	}
 
-	flavorObj, err := flavors.Get(c.computeClient, vmObj.Flavor["id"].(string)).Extract()
+	flavorObj, err := flavors.Get(c.ctx, c.computeClient, vmObj.Flavor["id"].(string)).Extract()
 	if err != nil {
 		return nil, fmt.Errorf("error looking up flavor: %v", err)
 	}
@@ -410,10 +439,10 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 	}
 
 	if vmObj.Description != "" {
-		if newVM.GetAnnotations() == nil {
+		if newVM.Annotations == nil {
 			newVM.Annotations = make(map[string]string)
 		}
-		newVM.ObjectMeta.Annotations[annotationDescription] = vmObj.Description
+		newVM.Annotations[annotationDescription] = vmObj.Description
 	}
 
 	vmSpec := kubevirt.VirtualMachineSpec{
@@ -594,7 +623,7 @@ func (c *Client) checkOrGetUUID(input string) (string, error) {
 	}*/
 
 	pg := servers.List(c.computeClient, servers.ListOpts{Name: input})
-	allPg, err := pg.AllPages()
+	allPg, err := pg.AllPages(c.ctx)
 	if err != nil {
 		return "", fmt.Errorf("error generating all pages in checkorgetuuid :%v", err)
 	}
@@ -634,9 +663,11 @@ func (c *Client) findVM(name string) (*ExtendedServer, error) {
 	if err != nil {
 		return nil, err
 	}
-	sr := servers.Get(c.computeClient, parsedUUID)
+	sr := servers.Get(c.ctx, c.computeClient, parsedUUID)
+
 	var s ExtendedServer
 	err = sr.ExtractInto(&s)
+
 	return &s, err
 }
 
@@ -664,7 +695,7 @@ func (c *Client) ImageFirmwareSettings(instance *servers.Server) (bool, bool, bo
 	var imageID string
 	var uefiType, tpmEnabled, secureBoot bool
 	for _, v := range instance.AttachedVolumes {
-		resp := volumes.Get(c.storageClient, v.ID)
+		resp := volumes.Get(c.ctx, c.storageClient, v.ID)
 		var volInfo volumes.Volume
 		if err := resp.ExtractIntoStructPtr(&volInfo, "volume"); err != nil {
 			return uefiType, tpmEnabled, secureBoot, fmt.Errorf("error extracting volume info for volume %s: %v", v.ID, err)
@@ -679,7 +710,7 @@ func (c *Client) ImageFirmwareSettings(instance *servers.Server) (bool, bool, bo
 		}
 	}
 
-	imageInfo, err := images.Get(c.imageClient, imageID).Extract()
+	imageInfo, err := images.Get(c.ctx, c.imageClient, imageID).Extract()
 	if err != nil {
 		return uefiType, tpmEnabled, secureBoot, fmt.Errorf("error getting image details for image %s: %v", imageID, err)
 	}
