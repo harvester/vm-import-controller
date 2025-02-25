@@ -261,10 +261,28 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 	return nil
 }
 
-func (c *Client) PowerOffVirtualMachine(vm *migration.VirtualMachineImport) error {
+func (c *Client) ShutdownGuest(vm *migration.VirtualMachineImport) error {
 	vmObj, err := c.findVM(vm.Spec.Folder, vm.Spec.VirtualMachineName)
 	if err != nil {
-		return fmt.Errorf("error finding VM in PowerOffVirtualMachine: %v", err)
+		return fmt.Errorf("error finding VM in ShutdownGuest: %w", err)
+	}
+
+	ok, err := c.IsPoweredOff(vm)
+	if err != nil {
+		return err
+	}
+
+	if !ok {
+		return vmObj.ShutdownGuest(c.ctx)
+	}
+
+	return nil
+}
+
+func (c *Client) PowerOff(vm *migration.VirtualMachineImport) error {
+	vmObj, err := c.findVM(vm.Spec.Folder, vm.Spec.VirtualMachineName)
+	if err != nil {
+		return fmt.Errorf("error finding VM in PowerOff: %w", err)
 	}
 
 	ok, err := c.IsPoweredOff(vm)
@@ -280,6 +298,10 @@ func (c *Client) PowerOffVirtualMachine(vm *migration.VirtualMachineImport) erro
 	return nil
 }
 
+func (c *Client) IsPowerOffSupported() bool {
+	return true
+}
+
 func (c *Client) IsPoweredOff(vm *migration.VirtualMachineImport) (bool, error) {
 	vmObj, err := c.findVM(vm.Spec.Folder, vm.Spec.VirtualMachineName)
 	if err != nil {
@@ -291,11 +313,7 @@ func (c *Client) IsPoweredOff(vm *migration.VirtualMachineImport) (bool, error) 
 		return false, fmt.Errorf("error looking up powerstate: %v", err)
 	}
 
-	if state == types.VirtualMachinePowerStatePoweredOff {
-		return true, nil
-	}
-
-	return false, nil
+	return state == types.VirtualMachinePowerStatePoweredOff, nil
 }
 
 func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*kubevirt.VirtualMachine, error) {

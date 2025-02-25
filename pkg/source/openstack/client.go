@@ -205,6 +205,14 @@ func (c *Client) Verify() error {
 }
 
 func (c *Client) PreFlightChecks(vm *migration.VirtualMachineImport) (err error) {
+	if ptr.Deref(vm.Spec.ForcePowerOff, false) {
+		logrus.WithFields(logrus.Fields{
+			"name":                    vm.Name,
+			"namespace":               vm.Namespace,
+			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+		}).Warn("A forced power off is not supported by OpenStack; ignoring the 'ForcePowerOff' setting")
+	}
+
 	// Check the source network mappings.
 	for _, nm := range vm.Spec.Mapping {
 		logrus.WithFields(logrus.Fields{
@@ -456,7 +464,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 	return nil
 }
 
-func (c *Client) PowerOffVirtualMachine(vm *migration.VirtualMachineImport) error {
+func (c *Client) ShutdownGuest(vm *migration.VirtualMachineImport) error {
 	serverUUID, err := c.checkOrGetUUID(vm.Spec.VirtualMachineName)
 	if err != nil {
 		return err
@@ -470,6 +478,20 @@ func (c *Client) PowerOffVirtualMachine(vm *migration.VirtualMachineImport) erro
 		return servers.Stop(c.ctx, c.computeClient, serverUUID).ExtractErr()
 	}
 	return nil
+}
+
+// PowerOff should never be called for OpenStack but must be implemented due
+// to the interface specification.
+func (c *Client) PowerOff(_ *migration.VirtualMachineImport) error {
+	// Explicitly powering off a VM is not supported by the OpenStack API.
+	// Instead, the OpenStack's stop command attempts a graceful shutdown
+	// via ACPI, falling back to a forced shutdown if the guest OS does not
+	// shut down within a configured timeout.
+	return fmt.Errorf("powering off is not supported by OpenStack")
+}
+
+func (c *Client) IsPowerOffSupported() bool {
+	return false
 }
 
 func (c *Client) IsPoweredOff(vm *migration.VirtualMachineImport) (bool, error) {

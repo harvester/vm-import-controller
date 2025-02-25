@@ -83,7 +83,7 @@ func Test_NewClient(t *testing.T) {
 	assert.NoError(err, "expected no error during verification of client")
 }
 
-func Test_PowerOffVirtualMachine(t *testing.T) {
+func Test_PowerOff(t *testing.T) {
 	ctx := context.TODO()
 	endpoint := fmt.Sprintf("https://localhost:%s/sdk", vcsimPort)
 	dc := "DC0"
@@ -115,8 +115,44 @@ func Test_PowerOffVirtualMachine(t *testing.T) {
 		},
 	}
 
-	err = c.PowerOffVirtualMachine(vm)
+	err = c.PowerOff(vm)
 	assert.NoError(err, "expected no error during VM power off")
+}
+
+func Test_ShutdownGuest(t *testing.T) {
+	ctx := context.TODO()
+	endpoint := fmt.Sprintf("https://localhost:%s/sdk", vcsimPort)
+	dc := "DC0"
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test",
+			Namespace: "default",
+		},
+		Data: map[string][]byte{
+			"username": []byte("user"),
+			"password": []byte("pass"),
+		},
+	}
+
+	c, err := NewClient(ctx, endpoint, dc, secret)
+	assert := require.New(t)
+	assert.NoError(err, "expected no error during creation of client")
+	err = c.Verify()
+	assert.NoError(err, "expected no error during verification of client")
+
+	vm := &migration.VirtualMachineImport{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "demo",
+			Namespace: "default",
+		},
+		Spec: migration.VirtualMachineImportSpec{
+			SourceCluster:      corev1.ObjectReference{},
+			VirtualMachineName: "DC0_H0_VM0",
+		},
+	}
+
+	err = c.ShutdownGuest(vm)
+	assert.NoError(err, "expected no error during VM shutdown via guest OS")
 }
 
 func Test_IsPoweredOff(t *testing.T) {
@@ -154,6 +190,28 @@ func Test_IsPoweredOff(t *testing.T) {
 	ok, err := c.IsPoweredOff(vm)
 	assert.NoError(err, "expected no error during check for power status")
 	assert.True(ok, "expected machine to be powered")
+}
+
+func Test_IsPowerOffSupported(t *testing.T) {
+	ctx := context.TODO()
+	endpoint := fmt.Sprintf("https://localhost:%s/sdk", vcsimPort)
+	dc := "DC0"
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test",
+			Namespace: "default",
+		},
+		Data: map[string][]byte{
+			"username": []byte("foo"),
+			"password": []byte("passwd1234"),
+		},
+	}
+
+	c, err := NewClient(ctx, endpoint, dc, secret)
+	assert := require.New(t)
+	assert.NoError(err, "expected no error during creation of client")
+	supported := c.IsPowerOffSupported()
+	assert.True(supported, "expected powering off is supported")
 }
 
 // Test_ExportVirtualMachine needs to reference a real vcenter as the vcsim doesnt support ovf export functionality
