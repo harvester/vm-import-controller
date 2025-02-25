@@ -380,7 +380,15 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 	return nil
 }
 
-func (c *Client) PowerOffVirtualMachine(vm *migration.VirtualMachineImport) error {
+func (c *Client) ShutdownGuest(_ *migration.VirtualMachineImport) error {
+	// The explicit shutdown of the guest OS is not supported.
+	// OpenStack's stop command attempts a graceful shutdown via ACPI,
+	// falling back to a forced shutdown if the guest OS does not shut
+	// down within a configured timeout.
+	return fmt.Errorf("shutdown guest OS is not supported by OpenStack")
+}
+
+func (c *Client) PowerOff(vm *migration.VirtualMachineImport) error {
 	serverUUID, err := c.checkOrGetUUID(vm.Spec.VirtualMachineName)
 	if err != nil {
 		return err
@@ -772,6 +780,10 @@ func generateNetworkInfo(info map[string]interface{}) ([]networkInfo, error) {
 
 // SanitizeVirtualMachineImport is used to sanitize the VirtualMachineImport object.
 func (c *Client) SanitizeVirtualMachineImport(vm *migration.VirtualMachineImport) error {
+	if vm.Spec.GracefulShutdown {
+		return fmt.Errorf("a graceful shutdown is done automatically by OpenStack; no need to activate the 'GracefulShutdown' option")
+	}
+
 	// If the given `spec.virtualMachineName` is a UUID, then we need to
 	// get the name from the OpenStack server object.
 	parsedUUID, err := uuid.Parse(vm.Spec.VirtualMachineName)
