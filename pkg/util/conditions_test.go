@@ -12,6 +12,30 @@ import (
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 )
 
+func Test_GetCondition(t *testing.T) {
+	conditions := []common.Condition{
+		{
+			Type:               migration.ClusterReadyCondition,
+			Status:             corev1.ConditionTrue,
+			LastUpdateTime:     metav1.Now().Format(time.RFC3339),
+			LastTransitionTime: metav1.Now().Format(time.RFC3339),
+		},
+		{
+			Type:               migration.ClusterErrorCondition,
+			Status:             corev1.ConditionFalse,
+			LastUpdateTime:     metav1.Now().Format(time.RFC3339),
+			LastTransitionTime: metav1.Now().Format(time.RFC3339),
+		},
+	}
+
+	assert := require.New(t)
+	assert.Nil(GetCondition(conditions, migration.ClusterErrorCondition, corev1.ConditionTrue))
+	condition := GetCondition(conditions, migration.ClusterReadyCondition, corev1.ConditionTrue)
+	assert.NotNil(condition)
+	assert.Equal(migration.ClusterReadyCondition, condition.Type)
+	assert.Equal(corev1.ConditionTrue, condition.Status)
+}
+
 func Test_ConditionExists(t *testing.T) {
 	conditions := []common.Condition{
 		{
