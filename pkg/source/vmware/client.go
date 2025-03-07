@@ -14,6 +14,7 @@ import (
 	"github.com/vmware/govmomi/nfc"
 	"github.com/vmware/govmomi/object"
 	"github.com/vmware/govmomi/session"
+	"github.com/vmware/govmomi/view"
 	"github.com/vmware/govmomi/vim25"
 	"github.com/vmware/govmomi/vim25/mo"
 	"github.com/vmware/govmomi/vim25/soap"
@@ -31,8 +32,9 @@ import (
 type Client struct {
 	ctx context.Context
 	*govmomi.Client
-	tmpCerts string
-	dc       string
+	tmpCerts       string
+	dc             string
+	networkMapping map[string]string
 }
 
 func NewClient(ctx context.Context, endpoint string, dc string, secret *corev1.Secret) (*Client, error) {
@@ -91,6 +93,11 @@ func NewClient(ctx context.Context, endpoint string, dc string, secret *corev1.S
 	vmwareClient.ctx = ctx
 	vmwareClient.Client = c
 	vmwareClient.dc = dc
+	networkMap, err := GenerateNetworkMapByRef(ctx, c.Client)
+	if err != nil {
+		return nil, fmt.Errorf("error generating network map during client initialisation: %v", err)
+	}
+	vmwareClient.networkMapping = networkMap
 	return vmwareClient, nil
 
 }
@@ -316,7 +323,7 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 	}
 
 	// Need CPU, Socket, Memory, VirtualNIC information to perform the mapping
-	networkInfo := identifyNetworkCards(o.Config.Hardware.Device)
+	networkInfo := identifyNetworkCards(c.networkMapping, o.Config.Hardware.Device)
 
 	vmSpec := kubevirt.VirtualMachineSpec{
 		RunStrategy: &[]kubevirt.VirtualMachineRunStrategy{kubevirt.RunStrategyRerunOnFailure}[0],
@@ -438,38 +445,58 @@ type networkInfo struct {
 	MappedNetwork string
 }
 
-func identifyNetworkCards(devices []types.BaseVirtualDevice) []networkInfo {
+func identifyNetworkCards(networkMap map[string]string, devices []types.BaseVirtualDevice) []networkInfo {
 	var resp []networkInfo
 	for _, d := range devices {
 		switch d := d.(type) {
 		case *types.VirtualVmxnet:
 			obj := d
+			summary := identifyNetworkName(networkMap, *obj.GetVirtualDevice())
+			if summary == "" {
+				summary = obj.DeviceInfo.GetDescription().Summary
+			}
 			resp = append(resp, networkInfo{
-				NetworkName: obj.DeviceInfo.GetDescription().Summary,
+				NetworkName: summary,
 				MAC:         obj.MacAddress,
 			})
 		case *types.VirtualE1000e:
 			obj := d
+			summary := identifyNetworkName(networkMap, *obj.GetVirtualDevice())
+			if summary == "" {
+				summary = obj.DeviceInfo.GetDescription().Summary
+			}
 			resp = append(resp, networkInfo{
-				NetworkName: obj.DeviceInfo.GetDescription().Summary,
+				NetworkName: summary,
 				MAC:         obj.MacAddress,
 			})
 		case *types.VirtualE1000:
 			obj := d
+			summary := identifyNetworkName(networkMap, *obj.GetVirtualDevice())
+			if summary == "" {
+				summary = obj.DeviceInfo.GetDescription().Summary
+			}
 			resp = append(resp, networkInfo{
-				NetworkName: obj.DeviceInfo.GetDescription().Summary,
+				NetworkName: summary,
 				MAC:         obj.MacAddress,
 			})
 		case *types.VirtualVmxnet3:
 			obj := d
+			summary := identifyNetworkName(networkMap, *obj.GetVirtualDevice())
+			if summary == "" {
+				summary = obj.DeviceInfo.GetDescription().Summary
+			}
 			resp = append(resp, networkInfo{
-				NetworkName: obj.DeviceInfo.GetDescription().Summary,
+				NetworkName: summary,
 				MAC:         obj.MacAddress,
 			})
 		case *types.VirtualVmxnet2:
 			obj := d
+			summary := identifyNetworkName(networkMap, *obj.GetVirtualDevice())
+			if summary == "" {
+				summary = obj.DeviceInfo.GetDescription().Summary
+			}
 			resp = append(resp, networkInfo{
-				NetworkName: obj.DeviceInfo.GetDescription().Summary,
+				NetworkName: summary,
 				MAC:         obj.MacAddress,
 			})
 		}
@@ -509,4 +536,52 @@ func (c *Client) SanitizeVirtualMachineImport(vm *migration.VirtualMachineImport
 	vm.Status.ImportedVirtualMachineName = strings.ToLower(vm.Spec.VirtualMachineName)
 
 	return nil
+}
+
+// GenerateNetworkMayByRef lists all networks defined in the DC and converts them to
+// network id: network name
+// this subsequently used to map a network id to network name if needed based on the type
+// of backing device for a nic
+func GenerateNetworkMapByRef(ctx context.Context, c *vim25.Client) (map[string]string, error) {
+	networks, err := generateNetworkList(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	returnMap := make(map[string]string, len(networks))
+	for _, v := range networks {
+		returnMap[v.Reference().Value] = v.Name
+	}
+	return returnMap, nil
+}
+
+func generateNetworkList(ctx context.Context, c *vim25.Client) ([]mo.Network, error) {
+	var networks []mo.Network
+	manager := view.NewManager(c)
+	networkView, err := manager.CreateContainerView(ctx, c.ServiceContent.RootFolder, []string{"Network"}, true)
+	if err != nil {
+		return networks, fmt.Errorf("error generating network container view: %v", err)
+	}
+	defer networkView.Destroy(ctx)
+	if err := networkView.Retrieve(ctx, []string{"Network"}, nil, &networks); err != nil {
+		return networks, fmt.Errorf("error retreiving networks: %v", err)
+	}
+	return networks, nil
+}
+
+// identifyNetworkName uses the backing device for a nic to identify network name correctly
+// in case of a nic using a Distributed VSwitch the summary returned from device is of the form
+// DVSwitch : HEX NUMBER which breaks network lookup. As a result we need to identify the network name
+// from the PortGroupKey
+func identifyNetworkName(networkMap map[string]string, device types.VirtualDevice) string {
+	var summary string
+	backing := device.Backing
+	switch b := backing.(type) {
+	case *types.VirtualEthernetCardDistributedVirtualPortBackingInfo:
+		obj := b
+		summary = networkMap[obj.Port.PortgroupKey]
+	case *types.VirtualEthernetCardNetworkBackingInfo:
+		obj := b
+		summary = obj.DeviceName
+	}
+	return summary
 }
