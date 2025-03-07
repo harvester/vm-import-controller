@@ -63,6 +63,8 @@ type VirtualMachineImportSpec struct {
 	// Defaults to 60 seconds.
 	// Please note that this field only applies to VMware imports.
 	GracefulShutdownTimeoutSeconds int32 `json:"gracefulShutdownTimeoutSeconds,omitempty"`
+	// SkipPreflightchecks allows vm import controller to skip preflight checks
+	SkipPreflightChecks bool `json:"skipPreflightChecks,omitemtpy"`
 }
 
 // VirtualMachineImportStatus tracks the status of the VirtualMachineImport export from migration and import into the Harvester cluster
