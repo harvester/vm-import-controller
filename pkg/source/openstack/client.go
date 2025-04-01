@@ -27,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/pointer"
 	kubevirt "kubevirt.io/api/core/v1"
 
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
@@ -780,8 +781,13 @@ func generateNetworkInfo(info map[string]interface{}) ([]networkInfo, error) {
 
 // SanitizeVirtualMachineImport is used to sanitize the VirtualMachineImport object.
 func (c *Client) SanitizeVirtualMachineImport(vm *migration.VirtualMachineImport) error {
-	if vm.Spec.GracefulShutdown {
-		return fmt.Errorf("a graceful shutdown is done automatically by OpenStack; no need to activate the 'GracefulShutdown' option")
+	if pointer.BoolDeref(vm.Spec.GracefulShutdown, false) {
+		logrus.WithFields(logrus.Fields{
+			"name":                    vm.Name,
+			"namespace":               vm.Namespace,
+			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+		}).Warn("A graceful shutdown is done automatically by OpenStack; ignoring the 'GracefulShutdown' option")
+		vm.Spec.GracefulShutdown = pointer.Bool(false)
 	}
 
 	// If the given `spec.virtualMachineName` is a UUID, then we need to
