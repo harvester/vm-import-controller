@@ -21,11 +21,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/pointer"
 	kubevirt "kubevirt.io/api/core/v1"
 
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/qemu"
 	"github.com/harvester/vm-import-controller/pkg/server"
+	"github.com/harvester/vm-import-controller/pkg/source"
 	"github.com/harvester/vm-import-controller/pkg/util"
 )
 
@@ -294,12 +296,9 @@ func (c *Client) IsPoweredOff(vm *migration.VirtualMachineImport) (bool, error) 
 }
 
 func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*kubevirt.VirtualMachine, error) {
-	var boolFalse = false
-	var boolTrue = true
-
 	vmObj, err := c.findVM(vm.Spec.Folder, vm.Spec.VirtualMachineName)
 	if err != nil {
-		return nil, fmt.Errorf("error quering vm in GenerateVirtualMachine: %v", err)
+		return nil, fmt.Errorf("error querying vm in GenerateVirtualMachine: %w", err)
 	}
 
 	newVM := &kubevirt.VirtualMachine{
@@ -353,7 +352,7 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 					},
 					Features: &kubevirt.Features{
 						ACPI: kubevirt.FeatureState{
-							Enabled: &boolTrue,
+							Enabled: pointer.Bool(true),
 						},
 					},
 				},
@@ -402,31 +401,21 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		})
 	}
 
-	// setup bios/efi, secureboot and tpm settings
-
-	if o.Config.Firmware == "efi" {
-		firmware := &kubevirt.Firmware{
-			Bootloader: &kubevirt.Bootloader{
-				EFI: &kubevirt.EFI{
-					SecureBoot: &boolFalse,
-				},
-			},
-		}
-		if *o.Config.BootOptions.EfiSecureBootEnabled {
-			firmware.Bootloader.EFI.SecureBoot = &boolTrue
-			vmSpec.Template.Spec.Domain.Features.SMM = &kubevirt.FeatureState{
-				Enabled: &boolTrue,
-			}
-		}
-		vmSpec.Template.Spec.Domain.Firmware = firmware
-		if *o.Summary.Config.TpmPresent {
-
-			vmSpec.Template.Spec.Domain.Devices.TPM = &kubevirt.TPMDevice{}
-		}
+	// Setup BIOS/EFI, SecureBoot and TPM settings.
+	uefi := strings.ToLower(o.Config.Firmware) == string(types.GuestOsDescriptorFirmwareTypeEfi)
+	secureBoot := false
+	if o.Config.BootOptions != nil {
+		secureBoot = pointer.BoolDeref(o.Config.BootOptions.EfiSecureBootEnabled, false)
 	}
+	tpm := pointer.BoolDeref(o.Summary.Config.TpmPresent, false)
+	if uefi {
+		source.VMSpecSetupUEFISettings(&vmSpec, secureBoot, tpm)
+	}
+
 	vmSpec.Template.Spec.Networks = networkConfig
 	vmSpec.Template.Spec.Domain.Devices.Interfaces = interfaces
 	newVM.Spec = vmSpec
+
 	// disk attachment needs query by core controller for storage classes, so will be added by the migration controller
 	return newVM, nil
 }
