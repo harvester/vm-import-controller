@@ -27,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/pointer"
 	kubevirt "kubevirt.io/api/core/v1"
 
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
@@ -771,7 +772,7 @@ func generateNetworkInfo(info map[string]interface{}) ([]networkInfo, error) {
 
 // SanitizeVirtualMachineImport is used to sanitize the VirtualMachineImport object.
 func (c *Client) SanitizeVirtualMachineImport(vm *migration.VirtualMachineImport) error {
-	if vm.Spec.GracefulShutdown {
+	if pointer.BoolDeref(vm.Spec.GracefulShutdown, false) {
 		return fmt.Errorf("a graceful shutdown is done automatically by OpenStack; no need to activate the 'GracefulShutdown' option")
 	}
 

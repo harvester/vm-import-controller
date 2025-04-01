@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/vmware/govmomi/vim25/mo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/pointer"
 
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/server"
@@ -339,4 +341,64 @@ func Test_identifyNetworkCards(t *testing.T) {
 	noNetworkMapping := []migration.NetworkMapping{}
 	noMappedInfo := mapNetworkCards(networkInfo, noNetworkMapping)
 	assert.Len(noMappedInfo, 0, "expected to find no item in the mapped networkinfo")
+}
+
+func Test_SanitizeVirtualMachineImport(t *testing.T) {
+	assert := require.New(t)
+	c := &Client{}
+	testCases := []struct {
+		desc                   string
+		vm                     *migration.VirtualMachineImport
+		wantedGracefulShutdown bool
+	}{
+		{
+			desc: "valid vm name, graceful shutdown disabled",
+			vm: &migration.VirtualMachineImport{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test01",
+					Namespace: "foo",
+				},
+				Spec: migration.VirtualMachineImportSpec{
+					VirtualMachineName: "DC0_H0_VM1",
+					GracefulShutdown:   pointer.Bool(false),
+				},
+			},
+			wantedGracefulShutdown: false,
+		},
+		{
+			desc: "valid vm name, graceful shutdown explicitly enabled",
+			vm: &migration.VirtualMachineImport{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test02",
+					Namespace: "bar",
+				},
+				Spec: migration.VirtualMachineImportSpec{
+					VirtualMachineName: "dc0_H0_VM2",
+					GracefulShutdown:   pointer.Bool(true),
+				},
+			},
+			wantedGracefulShutdown: true,
+		},
+		{
+			desc: "valid vm name, graceful shutdown enabled by default",
+			vm: &migration.VirtualMachineImport{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test03",
+					Namespace: "baz",
+				},
+				Spec: migration.VirtualMachineImportSpec{
+					VirtualMachineName: "dc0_h1_vm3",
+				},
+			},
+			wantedGracefulShutdown: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		vm := tc.vm
+		err := c.SanitizeVirtualMachineImport(vm)
+		assert.NoError(err, "expected no error during sanitization")
+		assert.Equal(vm.Status.ImportedVirtualMachineName, strings.ToLower(vm.Spec.VirtualMachineName), "expected VM name to be lowercase")
+		assert.True(pointer.BoolEqual(vm.Spec.GracefulShutdown, pointer.Bool(tc.wantedGracefulShutdown)))
+	}
 }

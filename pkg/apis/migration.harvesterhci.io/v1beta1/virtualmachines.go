@@ -44,13 +44,15 @@ type VirtualMachineImportSpec struct {
 	Mapping      []NetworkMapping `json:"networkMapping,omitempty"` //If empty new VirtualMachineImport will be mapped to Management Network
 	StorageClass string           `json:"storageClass,omitempty"`
 
+	// +optional
 	// GracefulShutdown is a flag to indicate whether the guest OS should be
 	// shutdown instead of performing a power off before the export is
 	// started. If the graceful shutdown is not done within the specified
 	// timeout, the VM will be powered off.
 	// Note, this is only supported by the VMware importer, OpenStack is
 	// performing a graceful shutdown by default.
-	GracefulShutdown bool `json:"gracefulShutdown,omitempty"`
+	// Defaults to true for the VMware importer if not disabled explicitly.
+	GracefulShutdown *bool `json:"gracefulShutdown,omitempty"`
 
 	// GracefulShutdownTimeout is the time in nanoseconds to wait for the guest
 	// OS to be shutdown gracefully before a hard power off is triggered.

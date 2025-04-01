@@ -9,6 +9,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
+	"k8s.io/utils/pointer"
 
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/server"
@@ -243,10 +244,10 @@ func Test_SanitizeVirtualMachineImport(t *testing.T) {
 	vm := &migration.VirtualMachineImport{
 		Spec: migration.VirtualMachineImportSpec{
 			VirtualMachineName: "foo",
-			GracefulShutdown:   true,
+			GracefulShutdown:   pointer.Bool(true),
 		},
 	}
 	err := c.SanitizeVirtualMachineImport(vm)
 	assert.Error(err, "expected to get error")
-	assert.Equal("a graceful shutdown is done automatically by OpenStack; no need to activate the 'GracefulShutdown' option", err.Error())
+	assert.Equal(err.Error(), "a graceful shutdown is done automatically by OpenStack; no need to activate the 'GracefulShutdown' option")
 }

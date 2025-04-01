@@ -21,6 +21,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/pointer"
 	kubevirt "kubevirt.io/api/core/v1"
 
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
@@ -523,6 +524,11 @@ func (c *Client) SanitizeVirtualMachineImport(vm *migration.VirtualMachineImport
 	// Note, VMware allows upper case characters in virtual machine names,
 	// so we need to convert them to lower case to be RFC 1123 compliant.
 	vm.Status.ImportedVirtualMachineName = strings.ToLower(vm.Spec.VirtualMachineName)
+
+	// Force the graceful shutdown if it is not explicitly enabled or disabled.
+	if vm.Spec.GracefulShutdown == nil {
+		vm.Spec.GracefulShutdown = pointer.Bool(true)
+	}
 
 	return nil
 }

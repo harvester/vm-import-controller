@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/utils/pointer"
 	capiformat "sigs.k8s.io/cluster-api/util/labels/format"
 
 	"github.com/harvester/vm-import-controller/pkg/apis/common"
@@ -369,7 +370,7 @@ func (h *virtualMachineHandler) triggerExport(vm *migration.VirtualMachineImport
 	}
 
 	// Trigger power off or shutdown guest OS of the source VM.
-	if vm.Spec.GracefulShutdown {
+	if pointer.BoolDeref(vm.Spec.GracefulShutdown, false) {
 		if !util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineShutdownGuest, v1.ConditionTrue) {
 			return triggerShutdownGuest(vm, vmo)
 		}
@@ -399,7 +400,7 @@ func (h *virtualMachineHandler) triggerExport(vm *migration.VirtualMachineImport
 			return nil
 		}
 
-		if vm.Spec.GracefulShutdown {
+		if pointer.BoolDeref(vm.Spec.GracefulShutdown, false) {
 			// If the VM was not gracefully shutdown by the guest OS within
 			// the configured time period, then force a hard power off.
 			condition := util.GetCondition(vm.Status.ImportConditions, migration.VirtualMachineShutdownGuest, v1.ConditionTrue)
