@@ -189,6 +189,8 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 				i.Path = vm.Name + "-" + vm.Namespace + "-" + i.Path
 			}
 
+			busType := detectBusType(i.DeviceId)
+
 			logrus.WithFields(logrus.Fields{
 				"name":                    vm.Name,
 				"namespace":               vm.Namespace,
@@ -197,6 +199,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 				"spec.sourceCluster.kind": vm.Spec.SourceCluster.Kind,
 				"deviceId":                i.DeviceId,
 				"path":                    i.Path,
+				"busType":                 busType,
 				"size":                    i.Size,
 			}).Info("Downloading an image")
 
@@ -208,7 +211,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 			vm.Status.DiskImportStatus = append(vm.Status.DiskImportStatus, migration.DiskInfo{
 				Name:     i.Path,
 				DiskSize: i.Size,
-				BusType:  adapterType(i.DeviceId),
+				BusType:  busType,
 			})
 		} else {
 			logrus.WithFields(logrus.Fields{
@@ -444,14 +447,33 @@ func generateNetworkInfos(devices []types.BaseVirtualDevice) []source.NetworkInf
 	return result
 }
 
-// adapterType tries to identify the disk bus type from vmware
-// to attempt and set correct bus types in kubevirt
-// default is to switch to SATA to ensure device boots
-func adapterType(deviceID string) kubevirt.DiskBus {
-	if strings.Contains(deviceID, "SCSI") {
+// detectBusType tries to identify the disk bus type from VMware to attempt and
+// set correct bus types in kubevirt.
+// Examples:
+// .-----------------------------------------------.
+// | Bus  | Device ID                              |
+// |------|----------------------------------------|
+// | SCSI | /vm-13010/ParaVirtualSCSIController0:0 |
+// | SATA | /vm-13767/VirtualAHCIController0:1     |
+// | IDE  | /vm-5678/VirtualIDEController1:0       |
+// | NVMe | /vm-2468/VirtualNVMEController0:0      |
+// | USB  | /vm-54321/VirtualUSBController0:0      |
+// '-----------------------------------------------'
+func detectBusType(deviceID string) kubevirt.DiskBus {
+	deviceID = strings.ToLower(deviceID)
+	// https://kubevirt.io/api-reference/v1.1.0/definitions.html#_v1_disktarget
+	switch {
+	case strings.Contains(deviceID, "scsi"):
 		return kubevirt.DiskBusSCSI
+	case strings.Contains(deviceID, "ahci"), strings.Contains(deviceID, "sata"), strings.Contains(deviceID, "ide"):
+		return kubevirt.DiskBusSATA
+	case strings.Contains(deviceID, "nvme"):
+		return kubevirt.DiskBusVirtio
+	case strings.Contains(deviceID, "usb"):
+		return kubevirt.DiskBusUSB
+	default:
+		return kubevirt.DiskBusVirtio
 	}
-	return kubevirt.DiskBusSATA
 }
 
 // SanitizeVirtualMachineImport is used to sanitize the VirtualMachineImport object.

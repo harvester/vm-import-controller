@@ -15,6 +15,7 @@ import (
 	"github.com/vmware/govmomi/vim25/types"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kubevirt "kubevirt.io/api/core/v1"
 	"k8s.io/utils/pointer"
 
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
@@ -387,4 +388,49 @@ func Test_identifyNetworkCards(t *testing.T) {
 	noNetworkMapping := []migration.NetworkMapping{}
 	noMappedInfo := source.MapNetworks(networkInfo, noNetworkMapping)
 	assert.Len(noMappedInfo, 0, "expected to find no item in the mapped networkinfo")
+}
+
+func Test_adapterType(t *testing.T) {
+	assert := require.New(t)
+	testCases := []struct {
+		desc     string
+		deviceID string
+		expected kubevirt.DiskBus
+	}{
+		{
+			desc:     "SCSI disk",
+			deviceID: "/vm-13010/ParaVirtualSCSIController0:0",
+			expected: kubevirt.DiskBusSCSI,
+		},
+		{
+			desc:     "NVMe disk",
+			deviceID: "/vm-2468/VirtualNVMEController0:0",
+			expected: kubevirt.DiskBusVirtio,
+		},
+		{
+			desc:     "USB disk",
+			deviceID: "/vm-54321/VirtualUSBController0:0",
+			expected: kubevirt.DiskBusUSB,
+		},
+		{
+			desc:     "SATA disk",
+			deviceID: "/vm-13767/VirtualAHCIController0:1",
+			expected: kubevirt.DiskBusSATA,
+		},
+		{
+			desc:     "IDE disk",
+			deviceID: "/vm-5678/VirtualIDEController1:0",
+			expected: kubevirt.DiskBusSATA,
+		},
+		{
+			desc:     "Unknown disk",
+			deviceID: "foo",
+			expected: kubevirt.DiskBusVirtio,
+		},
+	}
+
+	for _, tc := range testCases {
+		busType := detectBusType(tc.deviceID)
+		assert.Equal(tc.expected, busType)
+	}
 }
