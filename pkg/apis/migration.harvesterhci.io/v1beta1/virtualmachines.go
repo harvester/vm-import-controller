@@ -4,6 +4,7 @@ import (
 	"github.com/rancher/wrangler/pkg/condition"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	"github.com/harvester/vm-import-controller/pkg/apis/common"
@@ -30,9 +31,17 @@ type VirtualMachineImportSpec struct {
 	// Examples: "vm-1234", "my-VM" or "5649cac7-3871-4bb5-aab6-c72b8c18d0a2"
 	VirtualMachineName string `json:"virtualMachineName"`
 
-	Folder       string           `json:"folder,omitempty"`
-	Mapping      []NetworkMapping `json:"networkMapping,omitempty"` //If empty new VirtualMachineImport will be mapped to Management Network
-	StorageClass string           `json:"storageClass,omitempty"`
+	Folder string `json:"folder,omitempty"`
+
+	// If empty new VirtualMachineImport will be mapped to Management Network.
+	Mapping []NetworkMapping `json:"networkMapping,omitempty"`
+	// The default network interface model. This is always used when:
+	// - Auto-detection fails (OpenStack source client does not have auto-detection, therefore this field is used for every network interface).
+	// - No network mapping is provided and a "pod-network" is auto-created.
+	// Defaults to "virtio".
+	DefaultNetworkInterfaceModel *string `json:"defaultNetworkInterfaceModel,omitempty" wrangler:"type=string,options=e1000|e1000e|ne2k_pci|pcnet|rtl8139|virtio"`
+
+	StorageClass string `json:"storageClass,omitempty"`
 }
 
 // VirtualMachineImportStatus tracks the status of the VirtualMachineImport export from migration and import into the Harvester cluster
@@ -70,6 +79,9 @@ type DiskInfo struct {
 type NetworkMapping struct {
 	SourceNetwork      string `json:"sourceNetwork"`
 	DestinationNetwork string `json:"destinationNetwork"`
+	// Override the network interface model that is auto-detected (VMware)
+	// or defaulted (OpenStack).
+	NetworkInterfaceModel *string `json:"networkInterfaceModel,omitempty" wrangler:"type=string,options=e1000|e1000e|ne2k_pci|pcnet|rtl8139|virtio"`
 }
 
 type ImportStatus string
@@ -93,3 +105,23 @@ const (
 	VirtualMachineExportFailed    condition.Cond = "VMExportFailed"
 	VirtualMachineMigrationFailed ImportStatus   = "VMMigrationFailed"
 )
+
+// The supported network interface models.
+// This can be: e1000, e1000e, ne2k_pci, pcnet, rtl8139, virtio.
+// See https://kubevirt.io/user-guide/network/interfaces_and_networks/#interfaces
+const (
+	NetworkInterfaceModelE1000   = "e1000"
+	NetworkInterfaceModelE1000e  = "e1000e"
+	NetworkInterfaceModelNe2kPci = "ne2k_pci"
+	NetworkInterfaceModelPcnet   = "pcnet"
+	NetworkInterfaceModelRtl8139 = "rtl8139"
+	NetworkInterfaceModelVirtio  = "virtio"
+)
+
+func (in *VirtualMachineImport) GetDefaultNetworkInterfaceModel() string {
+	return ptr.Deref[string](in.Spec.DefaultNetworkInterfaceModel, NetworkInterfaceModelVirtio)
+}
+
+func (in *NetworkMapping) GetNetworkInterfaceModel() string {
+	return ptr.Deref[string](in.NetworkInterfaceModel, NetworkInterfaceModelVirtio)
+}
