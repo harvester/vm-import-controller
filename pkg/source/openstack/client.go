@@ -435,7 +435,7 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		return nil, fmt.Errorf("error getting firware settings: %v", err)
 	}
 
-	networkInfos, err := generateNetworkInfo(vmObj.Addresses)
+	networkInfos, err := generateNetworkInfos(vmObj.Addresses, vm.GetDefaultNetworkInterfaceModel())
 	if err != nil {
 		return nil, err
 	}
@@ -488,46 +488,8 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		},
 	}
 
-	mappedNetwork := mapNetworkCards(networkInfos, vm.Spec.Mapping)
-	networkConfig := make([]kubevirt.Network, 0, len(mappedNetwork))
-	for i, v := range mappedNetwork {
-		networkConfig = append(networkConfig, kubevirt.Network{
-			NetworkSource: kubevirt.NetworkSource{
-				Multus: &kubevirt.MultusNetwork{
-					NetworkName: v.MappedNetwork,
-				},
-			},
-			Name: fmt.Sprintf("migrated-%d", i),
-		})
-	}
-
-	interfaces := make([]kubevirt.Interface, 0, len(mappedNetwork))
-	for i, v := range mappedNetwork {
-		interfaces = append(interfaces, kubevirt.Interface{
-			Name:       fmt.Sprintf("migrated-%d", i),
-			MacAddress: v.MAC,
-			Model:      "virtio",
-			InterfaceBindingMethod: kubevirt.InterfaceBindingMethod{
-				Bridge: &kubevirt.InterfaceBridge{},
-			},
-		})
-	}
-	// if there is no network, attach to Pod network. Essential for VM to be booted up
-	if len(networkConfig) == 0 {
-		networkConfig = append(networkConfig, kubevirt.Network{
-			Name: "pod-network",
-			NetworkSource: kubevirt.NetworkSource{
-				Pod: &kubevirt.PodNetwork{},
-			},
-		})
-		interfaces = append(interfaces, kubevirt.Interface{
-			Name:  "pod-network",
-			Model: "virtio",
-			InterfaceBindingMethod: kubevirt.InterfaceBindingMethod{
-				Masquerade: &kubevirt.InterfaceMasquerade{},
-			},
-		})
-	}
+	mappedNetwork := source.MapNetworks(networkInfos, vm.Spec.Mapping)
+	networkConfig, interfaceConfig := source.GenerateNetworkInterfaceConfigs(mappedNetwork, vm.GetDefaultNetworkInterfaceModel())
 
 	// Setup BIOS/EFI, SecureBoot and TPM settings.
 	if uefi {
@@ -535,7 +497,7 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 	}
 
 	vmSpec.Template.Spec.Networks = networkConfig
-	vmSpec.Template.Spec.Domain.Devices.Interfaces = interfaces
+	vmSpec.Template.Spec.Domain.Devices.Interfaces = interfaceConfig
 	newVM.Spec = vmSpec
 
 	// disk attachment needs query by core controller for storage classes, so will be added by the migration controller
@@ -663,26 +625,6 @@ func (c *Client) findVM(name string) (*ExtendedServer, error) {
 	return &s, err
 }
 
-type networkInfo struct {
-	NetworkName   string
-	MAC           string
-	MappedNetwork string
-}
-
-func mapNetworkCards(networkCards []networkInfo, mapping []migration.NetworkMapping) []networkInfo {
-	var retNetwork []networkInfo
-	for _, nc := range networkCards {
-		for _, m := range mapping {
-			if m.SourceNetwork == nc.NetworkName {
-				nc.MappedNetwork = m.DestinationNetwork
-				retNetwork = append(retNetwork, nc)
-			}
-		}
-	}
-
-	return retNetwork
-}
-
 func (c *Client) ImageFirmwareSettings(instance *servers.Server) (bool, bool, bool, error) {
 	var imageID string
 	var uefiType, tpmEnabled, secureBoot bool
@@ -721,9 +663,10 @@ func (c *Client) ImageFirmwareSettings(instance *servers.Server) (bool, bool, bo
 	return uefiType, tpmEnabled, secureBoot, nil
 }
 
-func generateNetworkInfo(info map[string]interface{}) ([]networkInfo, error) {
-	networkInfos := make([]networkInfo, 0)
-	uniqueNetworks := make([]networkInfo, 0)
+func generateNetworkInfos(info map[string]interface{}, defaultInterfaceModel string) ([]source.NetworkInfo, error) {
+	networkInfos := make([]source.NetworkInfo, 0)
+	uniqueNetworks := make([]source.NetworkInfo, 0)
+
 	for network, values := range info {
 		valArr, ok := values.([]interface{})
 		if !ok {
@@ -734,15 +677,19 @@ func generateNetworkInfo(info map[string]interface{}) ([]networkInfo, error) {
 			if !ok {
 				return nil, fmt.Errorf("error asserting network array element into map[string]string")
 			}
-			networkInfos = append(networkInfos, networkInfo{
+			networkInfos = append(networkInfos, source.NetworkInfo{
 				NetworkName: network,
 				MAC:         valMap["OS-EXT-IPS-MAC:mac_addr"].(string),
+				// Note, the interface model is not provided via the OpenStack
+				// Nova API, therefore we need to set it ourselves.
+				Model: defaultInterfaceModel,
 			})
 		}
 	}
+
 	// in case of interfaces with ipv6 and ipv4 addresses they are reported twice, so we need to dedup them
 	// based on a mac address
-	networksMap := make(map[string]networkInfo)
+	networksMap := make(map[string]source.NetworkInfo)
 	for _, v := range networkInfos {
 		networksMap[v.MAC] = v
 	}
@@ -750,6 +697,7 @@ func generateNetworkInfo(info map[string]interface{}) ([]networkInfo, error) {
 	for _, v := range networksMap {
 		uniqueNetworks = append(uniqueNetworks, v)
 	}
+
 	return uniqueNetworks, nil
 }
 
