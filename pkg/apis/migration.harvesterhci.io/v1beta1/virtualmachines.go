@@ -30,9 +30,16 @@ type VirtualMachineImportSpec struct {
 	// Examples: "vm-1234", "my-VM" or "5649cac7-3871-4bb5-aab6-c72b8c18d0a2"
 	VirtualMachineName string `json:"virtualMachineName"`
 
-	Folder       string           `json:"folder,omitempty"`
-	Mapping      []NetworkMapping `json:"networkMapping,omitempty"` //If empty new VirtualMachineImport will be mapped to Management Network
-	StorageClass string           `json:"storageClass,omitempty"`
+	Folder string `json:"folder,omitempty"`
+
+	// If empty new VirtualMachineImport will be mapped to Management Network.
+	Mapping []NetworkMapping `json:"networkMapping,omitempty"`
+	// The Management Network interface model.
+	// This can be one of: e1000, e1000e, ne2k_pci, pcnet, rtl8139, virtio.
+	// Defaults to virtio.
+	ManagementNetworkInterfaceModel string `json:"managementNetworkInterfaceModel,omitempty" wrangler:"type=string,default=virtio,options=e1000|e1000e|ne2k_pci|pcnet|rtl8139|virtio"`
+
+	StorageClass string `json:"storageClass,omitempty"`
 }
 
 // VirtualMachineImportStatus tracks the status of the VirtualMachineImport export from migration and import into the Harvester cluster
@@ -70,6 +77,11 @@ type DiskInfo struct {
 type NetworkMapping struct {
 	SourceNetwork      string `json:"sourceNetwork"`
 	DestinationNetwork string `json:"destinationNetwork"`
+	// Override the interface model that is auto-detected or defaulted.
+	// This can be one of: e1000, e1000e, ne2k_pci, pcnet, rtl8139, virtio.
+	// When importing VMs from VMware, the interface model is auto-detected.
+	// For OpenStack, it always defaults to `virtio`.
+	InterfaceModel string `json:"interfaceModel,omitempty" wrangler:"type=string,options=e1000|e1000e|ne2k_pci|pcnet|rtl8139|virtio"`
 }
 
 type ImportStatus string
