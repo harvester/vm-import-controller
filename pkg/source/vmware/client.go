@@ -26,6 +26,7 @@ import (
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/qemu"
 	"github.com/harvester/vm-import-controller/pkg/server"
+	"github.com/harvester/vm-import-controller/pkg/util"
 )
 
 type Client struct {
@@ -314,6 +315,14 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 	if err != nil {
 		return nil, err
 	}
+
+	// Log the origin VM specification for better troubleshooting.
+	// Note, JSON is used to be able to prettify the output for better readability.
+	logrus.WithFields(util.FieldsToJSON(logrus.Fields{
+		"name":      vm.Name,
+		"namespace": vm.Namespace,
+		"spec":      o,
+	}, []string{"spec"})).Info("Origin spec of the VM to be imported")
 
 	// Need CPU, Socket, Memory, VirtualNIC information to perform the mapping
 	networkInfo := identifyNetworkCards(o.Config.Hardware.Device)
