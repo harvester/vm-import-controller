@@ -398,8 +398,23 @@ func Test_adapterType(t *testing.T) {
 		expected kubevirt.DiskBus
 	}{
 		{
-			desc:     "SCSI disk",
+			desc:     "SCSI disk - VMware Paravirtual",
 			deviceID: "/vm-13010/ParaVirtualSCSIController0:0",
+			expected: kubevirt.DiskBusSATA,
+		},
+		{
+			desc:     "SCSI disk - BusLogic Parallel",
+			deviceID: "/vm-13011/VirtualBusLogicController0:0",
+			expected: kubevirt.DiskBusSCSI,
+		},
+		{
+			desc:     "SCSI disk - LSI Logic Parallel",
+			deviceID: "/vm-13012/VirtualLsiLogicController0:0",
+			expected: kubevirt.DiskBusSCSI,
+		},
+		{
+			desc:     "SCSI disk - LSI Logic SAS",
+			deviceID: "/vm-13013/VirtualLsiLogicSASController0:0",
 			expected: kubevirt.DiskBusSCSI,
 		},
 		{
