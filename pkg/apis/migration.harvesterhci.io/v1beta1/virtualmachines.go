@@ -92,4 +92,5 @@ const (
 	VirtualMachineImageFailed     condition.Cond = "VirtualMachineImageFailed"
 	VirtualMachineExportFailed    condition.Cond = "VMExportFailed"
 	VirtualMachineMigrationFailed ImportStatus   = "VMMigrationFailed"
+	SkipPreflightChecks           string         = "harvesterhci.io/skip-preflight-checks"
 )

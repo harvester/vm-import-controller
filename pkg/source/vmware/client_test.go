@@ -305,3 +305,25 @@ func Test_identifyNetworkCards(t *testing.T) {
 	noMappedInfo := mapNetworkCards(networkInfo, noNetworkMapping)
 	assert.Len(noMappedInfo, 0, "expected to find no item in the mapped networkinfo")
 }
+
+func Test_ListNetworks(t *testing.T) {
+	ctx := context.TODO()
+	endpoint := fmt.Sprintf("https://thinkpad.local:%s/sdk", "8989")
+	dc := "DC0"
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test",
+			Namespace: "default",
+		},
+		Data: map[string][]byte{
+			"username": []byte("user"),
+			"password": []byte("pass"),
+		},
+	}
+
+	c, err := NewClient(ctx, endpoint, dc, secret)
+	assert := require.New(t)
+	assert.NoError(err)
+	err = c.ListNetworks()
+	assert.NoError(err)
+}

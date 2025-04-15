@@ -132,10 +132,15 @@ func (c *Client) Verify() error {
 
 func (c *Client) PreFlightChecks(vm *migration.VirtualMachineImport) (err error) {
 	// Check the source network mappings.
-	f := find.NewFinder(c.Client.Client, true)
-	dc := c.dc
-	if !strings.HasPrefix(c.dc, "/") {
-		dc = fmt.Sprintf("/%s", c.dc)
+	if vm.Annotations != nil {
+		if _, ok := vm.Annotations[migration.SkipPreflightChecks]; ok {
+			return nil
+		}
+	}
+
+	networkMap, err := GenerateNetworkMapByName(c.ctx, c.Client.Client)
+	if err != nil {
+		return fmt.Errorf("error generating network map: %v", err)
 	}
 	for _, nm := range vm.Spec.Mapping {
 		logrus.WithFields(logrus.Fields{
@@ -144,11 +149,9 @@ func (c *Client) PreFlightChecks(vm *migration.VirtualMachineImport) (err error)
 			"sourceNetwork": nm.SourceNetwork,
 		}).Info("Checking the source network as part of the preflight checks")
 
-		// The path looks like `/<datacenter>/network/<network-name>`.
-		path := filepath.Join(dc, "/network", nm.SourceNetwork)
-		_, err := f.Network(c.ctx, path)
-		if err != nil {
-			return fmt.Errorf("error getting source network '%s': %v", nm.SourceNetwork, err)
+		elements := strings.Split(nm.SourceNetwork, "/")
+		if _, ok := networkMap[elements[len(elements)-1]]; ok {
+			return nil
 		}
 	}
 
@@ -551,6 +554,20 @@ func GenerateNetworkMapByRef(ctx context.Context, c *vim25.Client) (map[string]s
 	for _, v := range networks {
 		returnMap[v.Reference().Value] = v.Name
 	}
+	logrus.Infof("generated networkMapByRef: %v", returnMap)
+	return returnMap, nil
+}
+
+func GenerateNetworkMapByName(ctx context.Context, c *vim25.Client) (map[string]string, error) {
+	networks, err := generateNetworkList(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	returnMap := make(map[string]string, len(networks))
+	for _, v := range networks {
+		returnMap[v.Name] = v.Reference().Value
+	}
+	logrus.Infof("generated networkMapByName: %v", returnMap)
 	return returnMap, nil
 }
 
@@ -578,10 +595,34 @@ func identifyNetworkName(networkMap map[string]string, device types.VirtualDevic
 	switch b := backing.(type) {
 	case *types.VirtualEthernetCardDistributedVirtualPortBackingInfo:
 		obj := b
+		logrus.Infof("looking up portgroupkey: %v", obj.Port.PortgroupKey)
 		summary = networkMap[obj.Port.PortgroupKey]
 	case *types.VirtualEthernetCardNetworkBackingInfo:
 		obj := b
+		logrus.Infof("using devicename: %v", obj.DeviceName)
 		summary = obj.DeviceName
 	}
 	return summary
+}
+
+func (c *Client) ListNetworks() error {
+	mgr := view.NewManager(c.Client.Client)
+
+	v, err := mgr.CreateContainerView(c.ctx, c.ServiceContent.RootFolder, []string{"Network"}, true)
+	if err != nil {
+		return fmt.Errorf("error creating view %v", err)
+	}
+
+	defer v.Destroy(c.ctx)
+	var networks []mo.Network
+	err = v.Retrieve(c.ctx, []string{"Network"}, nil, &networks)
+	if err != nil {
+		return fmt.Errorf("error fetching networks: %v", err)
+	}
+
+	for _, net := range networks {
+		fmt.Printf("%s: %s\n", net.Name, net.Reference())
+	}
+
+	return nil
 }
