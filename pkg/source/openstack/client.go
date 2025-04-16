@@ -31,6 +31,7 @@ import (
 
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/server"
+	"github.com/harvester/vm-import-controller/pkg/util"
 )
 
 const (
@@ -415,6 +416,14 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 	if err != nil {
 		return nil, fmt.Errorf("error finding VM in GenerateVirtualMachine: %v", err)
 	}
+
+	// Log the origin VM specification for better troubleshooting.
+	// Note, JSON is used to be able to prettify the output for better readability.
+	logrus.WithFields(util.FieldsToJSON(logrus.Fields{
+		"name":      vm.Name,
+		"namespace": vm.Namespace,
+		"spec":      vmObj,
+	}, []string{"spec"})).Info("Origin spec of the VM to be imported")
 
 	flavorObj, err := flavors.Get(c.ctx, c.computeClient, vmObj.Flavor["id"].(string)).Extract()
 	if err != nil {
