@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/vmware/govmomi/vim25/mo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/pointer"
 
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/server"
@@ -77,7 +79,7 @@ func Test_NewClient(t *testing.T) {
 	assert.NoError(err, "expected no error during verification of client")
 }
 
-func Test_PowerOffVirtualMachine(t *testing.T) {
+func Test_PowerOff(t *testing.T) {
 	ctx := context.TODO()
 	endpoint := fmt.Sprintf("https://localhost:%s/sdk", vcsimPort)
 	dc := "DC0"
@@ -109,8 +111,44 @@ func Test_PowerOffVirtualMachine(t *testing.T) {
 		},
 	}
 
-	err = c.PowerOffVirtualMachine(vm)
+	err = c.PowerOff(vm)
 	assert.NoError(err, "expected no error during VM power off")
+}
+
+func Test_ShutdownGuest(t *testing.T) {
+	ctx := context.TODO()
+	endpoint := fmt.Sprintf("https://localhost:%s/sdk", vcsimPort)
+	dc := "DC0"
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test",
+			Namespace: "default",
+		},
+		Data: map[string][]byte{
+			"username": []byte("user"),
+			"password": []byte("pass"),
+		},
+	}
+
+	c, err := NewClient(ctx, endpoint, dc, secret)
+	assert := require.New(t)
+	assert.NoError(err, "expected no error during creation of client")
+	err = c.Verify()
+	assert.NoError(err, "expected no error during verification of client")
+
+	vm := &migration.VirtualMachineImport{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "demo",
+			Namespace: "default",
+		},
+		Spec: migration.VirtualMachineImportSpec{
+			SourceCluster:      corev1.ObjectReference{},
+			VirtualMachineName: "DC0_H0_VM0",
+		},
+	}
+
+	err = c.ShutdownGuest(vm)
+	assert.NoError(err, "expected no error during VM shutdown via guest OS")
 }
 
 func Test_IsPoweredOff(t *testing.T) {
@@ -303,4 +341,64 @@ func Test_identifyNetworkCards(t *testing.T) {
 	noNetworkMapping := []migration.NetworkMapping{}
 	noMappedInfo := mapNetworkCards(networkInfo, noNetworkMapping)
 	assert.Len(noMappedInfo, 0, "expected to find no item in the mapped networkinfo")
+}
+
+func Test_SanitizeVirtualMachineImport(t *testing.T) {
+	assert := require.New(t)
+	c := &Client{}
+	testCases := []struct {
+		desc                   string
+		vm                     *migration.VirtualMachineImport
+		wantedGracefulShutdown bool
+	}{
+		{
+			desc: "valid vm name, graceful shutdown disabled",
+			vm: &migration.VirtualMachineImport{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test01",
+					Namespace: "foo",
+				},
+				Spec: migration.VirtualMachineImportSpec{
+					VirtualMachineName: "DC0_H0_VM1",
+					GracefulShutdown:   pointer.Bool(false),
+				},
+			},
+			wantedGracefulShutdown: false,
+		},
+		{
+			desc: "valid vm name, graceful shutdown explicitly enabled",
+			vm: &migration.VirtualMachineImport{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test02",
+					Namespace: "bar",
+				},
+				Spec: migration.VirtualMachineImportSpec{
+					VirtualMachineName: "dc0_H0_VM2",
+					GracefulShutdown:   pointer.Bool(true),
+				},
+			},
+			wantedGracefulShutdown: true,
+		},
+		{
+			desc: "valid vm name, graceful shutdown enabled by default",
+			vm: &migration.VirtualMachineImport{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test03",
+					Namespace: "baz",
+				},
+				Spec: migration.VirtualMachineImportSpec{
+					VirtualMachineName: "dc0_h1_vm3",
+				},
+			},
+			wantedGracefulShutdown: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		vm := tc.vm
+		err := c.SanitizeVirtualMachineImport(vm)
+		assert.NoError(err, "expected no error during sanitization")
+		assert.Equal(vm.Status.ImportedVirtualMachineName, strings.ToLower(vm.Spec.VirtualMachineName), "expected VM name to be lowercase")
+		assert.True(pointer.BoolEqual(vm.Spec.GracefulShutdown, pointer.Bool(tc.wantedGracefulShutdown)))
+	}
 }
