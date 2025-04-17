@@ -16,6 +16,7 @@ import (
 
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/server"
+	"github.com/harvester/vm-import-controller/pkg/source"
 )
 
 var vcsimPort string
@@ -252,7 +253,7 @@ func Test_GenerateVirtualMachine(t *testing.T) {
 	assert.Len(newVM.Spec.Template.Spec.Domain.Devices.Interfaces, 1, "should have found a network map")
 	assert.Equal(newVM.Spec.Template.Spec.Domain.Memory.Guest.String(), "32M", "expected VM to have 32M memory")
 	assert.NotEmpty(newVM.Spec.Template.Spec.Domain.Resources.Limits, "expect to find resource requests to be present")
-
+	assert.Equal(newVM.Spec.Template.Spec.Domain.Devices.Interfaces[0].Model, source.NetworkInterfaceModelE1000, "expected to have a NIC with e1000 model")
 }
 
 func Test_identifyNetworkCards(t *testing.T) {
@@ -294,13 +295,15 @@ func Test_identifyNetworkCards(t *testing.T) {
 		{
 			SourceNetwork:      "DVSwitch: fea97929-4b2d-5972-b146-930c6d0b4014",
 			DestinationNetwork: "pod-network",
+			InterfaceModel:     "rtl8139",
 		},
 	}
 
-	mappedInfo := mapNetworkCards(networkInfo, networkMapping)
+	mappedInfo := source.MapNetworkCards(networkInfo, networkMapping)
 	assert.Len(mappedInfo, 1, "expected to find only 1 item in the mapped networkinfo")
+	assert.Equal(mappedInfo[0].Model, "rtl8139", "expected to have a NIC with rtl8139 model")
 
 	noNetworkMapping := []migration.NetworkMapping{}
-	noMappedInfo := mapNetworkCards(networkInfo, noNetworkMapping)
+	noMappedInfo := source.MapNetworkCards(networkInfo, noNetworkMapping)
 	assert.Len(noMappedInfo, 0, "expected to find no item in the mapped networkinfo")
 }

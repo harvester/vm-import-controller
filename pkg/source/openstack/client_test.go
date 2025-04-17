@@ -12,6 +12,7 @@ import (
 
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/server"
+	"github.com/harvester/vm-import-controller/pkg/source"
 )
 
 var (
@@ -126,8 +127,9 @@ func Test_GenerateVirtualMachine(t *testing.T) {
 	assert.NoError(err, "expected no error during GenerateVirtualMachine")
 	assert.NotEmpty(newVM.Spec.Template.Spec.Domain.CPU, "expected CPU's to not be empty")
 	assert.NotEmpty(newVM.Spec.Template.Spec.Domain.Resources.Limits.Memory(), "expected memory limit to not be empty")
-	assert.NotEmpty(newVM.Spec.Template.Spec.Networks, "expected to find atleast 1 network as pod network should have been applied")
-	assert.NotEmpty(newVM.Spec.Template.Spec.Domain.Devices.Interfaces, "expected to find atleast 1 interface for pod-network")
+	assert.NotEmpty(newVM.Spec.Template.Spec.Networks, "expected to find at least 1 network as pod network should have been applied")
+	assert.NotEmpty(newVM.Spec.Template.Spec.Domain.Devices.Interfaces, "expected to find at least 1 interface for pod-network")
+	assert.Equal(newVM.Spec.Template.Spec.Domain.Devices.Interfaces[0].Model, source.NetworkInterfaceModelVirtio, "expected to have a NIC with virtio model")
 }
 
 func Test_generateNetworkInfo(t *testing.T) {
@@ -140,7 +142,8 @@ func Test_generateNetworkInfo(t *testing.T) {
 	vmInterfaceDetails, err := generateNetworkInfo(networkInfoMap)
 	assert.NoError(err, "expected no error while generating network info")
 	assert.Len(vmInterfaceDetails, 2, "expected to find 2 interfaces only")
-
+	assert.Equal(vmInterfaceDetails[0].Model, source.NetworkInterfaceModelVirtio, "expected to have a NIC with virtio model")
+	assert.Equal(vmInterfaceDetails[1].Model, source.NetworkInterfaceModelVirtio, "expected to have a NIC with virtio model")
 }
 
 func Test_ClientOptions(t *testing.T) {
