@@ -15,8 +15,8 @@ import (
 	"github.com/vmware/govmomi/vim25/types"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	kubevirt "kubevirt.io/api/core/v1"
 	"k8s.io/utils/pointer"
+	kubevirt "kubevirt.io/api/core/v1"
 
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/server"
@@ -390,62 +390,78 @@ func Test_identifyNetworkCards(t *testing.T) {
 	assert.Len(noMappedInfo, 0, "expected to find no item in the mapped networkinfo")
 }
 
-func Test_adapterType(t *testing.T) {
+func Test_detectDiskBusType(t *testing.T) {
 	assert := require.New(t)
 	testCases := []struct {
 		desc     string
 		deviceID string
+		def      kubevirt.DiskBus
 		expected kubevirt.DiskBus
 	}{
 		{
 			desc:     "SCSI disk - VMware Paravirtual",
 			deviceID: "/vm-13010/ParaVirtualSCSIController0:0",
+			def:      kubevirt.DiskBusVirtio,
 			expected: kubevirt.DiskBusSATA,
 		},
 		{
 			desc:     "SCSI disk - BusLogic Parallel",
 			deviceID: "/vm-13011/VirtualBusLogicController0:0",
+			def:      kubevirt.DiskBusVirtio,
 			expected: kubevirt.DiskBusSCSI,
 		},
 		{
 			desc:     "SCSI disk - LSI Logic Parallel",
 			deviceID: "/vm-13012/VirtualLsiLogicController0:0",
+			def:      kubevirt.DiskBusVirtio,
 			expected: kubevirt.DiskBusSCSI,
 		},
 		{
 			desc:     "SCSI disk - LSI Logic SAS",
 			deviceID: "/vm-13013/VirtualLsiLogicSASController0:0",
+			def:      kubevirt.DiskBusVirtio,
 			expected: kubevirt.DiskBusSCSI,
 		},
 		{
 			desc:     "NVMe disk",
 			deviceID: "/vm-2468/VirtualNVMEController0:0",
+			def:      kubevirt.DiskBusVirtio,
 			expected: kubevirt.DiskBusVirtio,
 		},
 		{
 			desc:     "USB disk",
 			deviceID: "/vm-54321/VirtualUSBController0:0",
+			def:      kubevirt.DiskBusVirtio,
 			expected: kubevirt.DiskBusUSB,
 		},
 		{
 			desc:     "SATA disk",
 			deviceID: "/vm-13767/VirtualAHCIController0:1",
+			def:      kubevirt.DiskBusVirtio,
 			expected: kubevirt.DiskBusSATA,
 		},
 		{
 			desc:     "IDE disk",
 			deviceID: "/vm-5678/VirtualIDEController1:0",
+			def:      kubevirt.DiskBusVirtio,
 			expected: kubevirt.DiskBusSATA,
 		},
 		{
-			desc:     "Unknown disk",
+			desc:     "Unknown disk 1",
 			deviceID: "foo",
+			def:      kubevirt.DiskBusVirtio,
 			expected: kubevirt.DiskBusVirtio,
+		},
+		{
+			desc:     "Unknown disk 2",
+			deviceID: "bar",
+			def:      kubevirt.DiskBusSATA,
+			expected: kubevirt.DiskBusSATA,
 		},
 	}
 
 	for _, tc := range testCases {
-		busType := detectBusType(tc.deviceID)
+		busType := detectDiskBusType(tc.deviceID, tc.def)
 		assert.Equal(tc.expected, busType)
 	}
 }

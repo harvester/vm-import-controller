@@ -189,7 +189,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 				i.Path = vm.Name + "-" + vm.Namespace + "-" + i.Path
 			}
 
-			busType := detectBusType(i.DeviceId)
+			busType := detectDiskBusType(i.DeviceId, vm.GetDefaultDiskBusType())
 
 			logrus.WithFields(logrus.Fields{
 				"name":                    vm.Name,
@@ -447,8 +447,9 @@ func generateNetworkInfos(devices []types.BaseVirtualDevice) []source.NetworkInf
 	return result
 }
 
-// detectBusType tries to identify the disk bus type from VMware to attempt and
-// set correct bus types in KubeVirt.
+// detectDiskBusType tries to identify the disk bus type from VMware to attempt and
+// set correct bus types in KubeVirt. Defaults to the specified bus type in `def`
+// if auto-detection fails.
 // Examples:
 // .--------------------------------------------------.
 // | Bus  | Device ID                                 |
@@ -467,7 +468,7 @@ func generateNetworkInfos(devices []types.BaseVirtualDevice) []source.NetworkInf
 // - https://vdc-download.vmware.com/vmwb-repository/dcr-public/d1902b0e-d479-46bf-8ac9-cee0e31e8ec0/07ce8dbd-db48-4261-9b8f-c6d3ad8ba472/vim.vm.device.VirtualSCSIController.html
 // - https://libvirt.org/formatdomain.html#controllers
 // - https://kubevirt.io/api-reference/v1.1.0/definitions.html#_v1_disktarget
-func detectBusType(deviceID string) kubevirt.DiskBus {
+func detectDiskBusType(deviceID string, def kubevirt.DiskBus) kubevirt.DiskBus {
 	deviceID = strings.ToLower(deviceID)
 	switch {
 	case strings.Contains(deviceID, "paravirtualscsi"):
@@ -489,7 +490,7 @@ func detectBusType(deviceID string) kubevirt.DiskBus {
 	case strings.Contains(deviceID, "usb"):
 		return kubevirt.DiskBusUSB
 	default:
-		return kubevirt.DiskBusVirtio
+		return def
 	}
 }
 

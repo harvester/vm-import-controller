@@ -42,6 +42,12 @@ type VirtualMachineImportSpec struct {
 	DefaultNetworkInterfaceModel *string `json:"defaultNetworkInterfaceModel,omitempty" wrangler:"type=string,options=e1000|e1000e|ne2k_pci|pcnet|rtl8139|virtio"`
 
 	StorageClass string `json:"storageClass,omitempty"`
+
+	// The bus type that is used for imported disks if auto-detection fails.
+	// Note, the OpenStack source client does not support auto-detection,
+	// therefore it always makes use of this field.
+	// Defaults to "virtio".
+	DefaultDiskBusType *kubevirtv1.DiskBus `json:"defaultDiskBusType,omitempty"`
 }
 
 // VirtualMachineImportStatus tracks the status of the VirtualMachineImport export from migration and import into the Harvester cluster
@@ -117,6 +123,10 @@ const (
 	NetworkInterfaceModelRtl8139 = "rtl8139"
 	NetworkInterfaceModelVirtio  = "virtio"
 )
+
+func (in *VirtualMachineImport) GetDefaultDiskBusType() kubevirtv1.DiskBus {
+	return ptr.Deref[kubevirtv1.DiskBus](in.Spec.DefaultDiskBusType, kubevirtv1.DiskBusVirtio)
+}
 
 func (in *VirtualMachineImport) GetDefaultNetworkInterfaceModel() string {
 	return ptr.Deref[string](in.Spec.DefaultNetworkInterfaceModel, NetworkInterfaceModelVirtio)
