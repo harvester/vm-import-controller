@@ -375,7 +375,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			Name:          rawImageFileName,
 			DiskSize:      int64(volObj.Size),
 			DiskLocalPath: server.TempDir(),
-			BusType:       kubevirt.DiskBusVirtio,
+			BusType:       vm.GetDefaultDiskBusType(),
 		})
 	}
 
