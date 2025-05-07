@@ -365,15 +365,16 @@ func Test_identifyNetworkCards(t *testing.T) {
 	err = vmObj.Properties(c.ctx, vmObj.Reference(), []string{}, &o)
 	assert.NoError(err, "expected no error looking up vmObj properties")
 
-	networkInfo := identifyNetworkCards(o.Config.Hardware.Device)
+	networkInfo := identifyNetworkCards(c.networkMapping, o.Config.Hardware.Device)
 	assert.Len(networkInfo, 1, "expected to find only 1 item in the networkInfo")
+	t.Log(networkInfo)
 	networkMapping := []migration.NetworkMapping{
 		{
 			SourceNetwork:      "dummyNetwork",
 			DestinationNetwork: "harvester1",
 		},
 		{
-			SourceNetwork:      "DVSwitch: fea97929-4b2d-5972-b146-930c6d0b4014",
+			SourceNetwork:      "DC0_DVPG0",
 			DestinationNetwork: "pod-network",
 		},
 	}
@@ -384,4 +385,26 @@ func Test_identifyNetworkCards(t *testing.T) {
 	noNetworkMapping := []migration.NetworkMapping{}
 	noMappedInfo := mapNetworkCards(networkInfo, noNetworkMapping)
 	assert.Len(noMappedInfo, 0, "expected to find no item in the mapped networkinfo")
+}
+
+func Test_ListNetworks(t *testing.T) {
+	ctx := context.TODO()
+	endpoint := fmt.Sprintf("https://thinkpad.local:%s/sdk", "8989")
+	dc := "DC0"
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test",
+			Namespace: "default",
+		},
+		Data: map[string][]byte{
+			"username": []byte("user"),
+			"password": []byte("pass"),
+		},
+	}
+
+	c, err := NewClient(ctx, endpoint, dc, secret)
+	assert := require.New(t)
+	assert.NoError(err)
+	err = c.ListNetworks()
+	assert.NoError(err)
 }
