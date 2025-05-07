@@ -402,7 +402,7 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 	}
 
 	// Setup BIOS/EFI, SecureBoot and TPM settings.
-	uefi := strings.ToLower(o.Config.Firmware) == string(types.GuestOsDescriptorFirmwareTypeEfi)
+	uefi := strings.EqualFold(o.Config.Firmware, string(types.GuestOsDescriptorFirmwareTypeEfi))
 	secureBoot := false
 	if o.Config.BootOptions != nil {
 		secureBoot = pointer.BoolDeref(o.Config.BootOptions.EfiSecureBootEnabled, false)

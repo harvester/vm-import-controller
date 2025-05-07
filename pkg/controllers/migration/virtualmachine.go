@@ -429,12 +429,12 @@ func (h *virtualMachineHandler) generateVMO(vm *migration.VirtualMachineImport) 
 	// generate VirtualMachineOperations Interface.
 	// this will be used for migration specific operations
 
-	if source.GetKind() == strings.ToLower("vmwaresource") {
+	if strings.EqualFold(source.GetKind(), "vmwaresource") {
 		endpoint, dc := source.GetConnectionInfo()
 		return vmware.NewClient(h.ctx, endpoint, dc, secret)
 	}
 
-	if source.GetKind() == strings.ToLower("openstacksource") {
+	if strings.EqualFold(source.GetKind(), "openstacksource") {
 		endpoint, region := source.GetConnectionInfo()
 		options := source.GetOptions().(migration.OpenstackSourceOptions)
 		return openstack.NewClient(h.ctx, endpoint, region, secret, options)
@@ -446,13 +446,13 @@ func (h *virtualMachineHandler) generateVMO(vm *migration.VirtualMachineImport) 
 func (h *virtualMachineHandler) generateSource(vm *migration.VirtualMachineImport) (migration.SourceInterface, error) {
 	var s migration.SourceInterface
 	var err error
-	if strings.ToLower(vm.Spec.SourceCluster.Kind) == "vmwaresource" {
+	if strings.EqualFold(vm.Spec.SourceCluster.Kind, "vmwaresource") {
 		s, err = h.vmware.Get(vm.Spec.SourceCluster.Namespace, vm.Spec.SourceCluster.Name, metav1.GetOptions{})
 		if err != nil {
 			return nil, err
 		}
 	}
-	if strings.ToLower(vm.Spec.SourceCluster.Kind) == "openstacksource" {
+	if strings.EqualFold(vm.Spec.SourceCluster.Kind, "openstacksource") {
 		s, err = h.openstack.Get(vm.Spec.SourceCluster.Namespace, vm.Spec.SourceCluster.Name, metav1.GetOptions{})
 		if err != nil {
 			return nil, err
@@ -617,7 +617,7 @@ func (h *virtualMachineHandler) ReconcileVMI(_ string, _ string, obj runtime.Obj
 		owners := vmiObj.GetOwnerReferences()
 		if vmiObj.DeletionTimestamp == nil {
 			for _, v := range owners {
-				if strings.ToLower(v.Kind) == "virtualmachineimport" {
+				if strings.EqualFold(v.Kind, "virtualmachineimport") {
 					return []relatedresource.Key{
 						{
 							Namespace: vmiObj.Namespace,
@@ -625,10 +625,8 @@ func (h *virtualMachineHandler) ReconcileVMI(_ string, _ string, obj runtime.Obj
 						},
 					}, nil
 				}
-
 			}
 		}
-
 	}
 
 	return nil, nil
