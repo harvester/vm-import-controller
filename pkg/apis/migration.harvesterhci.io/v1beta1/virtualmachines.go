@@ -4,6 +4,7 @@ import (
 	"github.com/rancher/wrangler/pkg/condition"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	"github.com/harvester/vm-import-controller/pkg/apis/common"
@@ -33,6 +34,12 @@ type VirtualMachineImportSpec struct {
 	Folder       string           `json:"folder,omitempty"`
 	Mapping      []NetworkMapping `json:"networkMapping,omitempty"` //If empty new VirtualMachineImport will be mapped to Management Network
 	StorageClass string           `json:"storageClass,omitempty"`
+
+	// The bus type that is used for imported disks if auto-detection fails.
+	// Note, the OpenStack source client does not support auto-detection,
+	// therefore it always makes use of this field.
+	// Defaults to "virtio".
+	DefaultDiskBusType *kubevirtv1.DiskBus `json:"defaultDiskBusType,omitempty"`
 }
 
 // VirtualMachineImportStatus tracks the status of the VirtualMachineImport export from migration and import into the Harvester cluster
@@ -93,3 +100,7 @@ const (
 	VirtualMachineExportFailed    condition.Cond = "VMExportFailed"
 	VirtualMachineMigrationFailed ImportStatus   = "VMMigrationFailed"
 )
+
+func (in *VirtualMachineImport) GetDefaultDiskBusType() kubevirtv1.DiskBus {
+	return ptr.Deref[kubevirtv1.DiskBus](in.Spec.DefaultDiskBusType, kubevirtv1.DiskBusVirtio)
+}
