@@ -258,10 +258,28 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 	return nil
 }
 
-func (c *Client) PowerOffVirtualMachine(vm *migration.VirtualMachineImport) error {
+func (c *Client) ShutdownGuest(vm *migration.VirtualMachineImport) error {
 	vmObj, err := c.findVM(vm.Spec.Folder, vm.Spec.VirtualMachineName)
 	if err != nil {
-		return fmt.Errorf("error finding VM in PowerOffVirtualMachine: %v", err)
+		return fmt.Errorf("error finding VM in ShutdownGuest: %w", err)
+	}
+
+	ok, err := c.IsPoweredOff(vm)
+	if err != nil {
+		return err
+	}
+
+	if !ok {
+		return vmObj.ShutdownGuest(c.ctx)
+	}
+
+	return nil
+}
+
+func (c *Client) PowerOff(vm *migration.VirtualMachineImport) error {
+	vmObj, err := c.findVM(vm.Spec.Folder, vm.Spec.VirtualMachineName)
+	if err != nil {
+		return fmt.Errorf("error finding VM in PowerOff: %w", err)
 	}
 
 	ok, err := c.IsPoweredOff(vm)
@@ -288,11 +306,7 @@ func (c *Client) IsPoweredOff(vm *migration.VirtualMachineImport) (bool, error) 
 		return false, fmt.Errorf("error looking up powerstate: %v", err)
 	}
 
-	if state == types.VirtualMachinePowerStatePoweredOff {
-		return true, nil
-	}
-
-	return false, nil
+	return state == types.VirtualMachinePowerStatePoweredOff, nil
 }
 
 func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*kubevirt.VirtualMachine, error) {
@@ -505,6 +519,11 @@ func (c *Client) SanitizeVirtualMachineImport(vm *migration.VirtualMachineImport
 	// Note, VMware allows upper case characters in virtual machine names,
 	// so we need to convert them to lower case to be RFC 1123 compliant.
 	vm.Status.ImportedVirtualMachineName = strings.ToLower(vm.Spec.VirtualMachineName)
+
+	// Force the graceful shutdown if it is not explicitly enabled or disabled.
+	if vm.Spec.GracefulShutdown == nil {
+		vm.Spec.GracefulShutdown = pointer.Bool(true)
+	}
 
 	return nil
 }

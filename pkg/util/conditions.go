@@ -7,6 +7,16 @@ import (
 	"github.com/harvester/vm-import-controller/pkg/apis/common"
 )
 
+func GetCondition(conditions []common.Condition, c condition.Cond, condType v1.ConditionStatus) *common.Condition {
+	for _, v := range conditions {
+		if v.Type == c && v.Status == condType {
+			return &v
+		}
+	}
+
+	return nil
+}
+
 func ConditionExists(conditions []common.Condition, c condition.Cond, condType v1.ConditionStatus) bool {
 	for _, v := range conditions {
 		if v.Type == c && v.Status == condType {

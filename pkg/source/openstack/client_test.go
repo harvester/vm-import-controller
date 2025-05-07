@@ -9,6 +9,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
+	"k8s.io/utils/pointer"
 
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/server"
@@ -85,7 +86,7 @@ func Test_IsPoweredOff(t *testing.T) {
 	assert.NoError(err, "expected no error during check of power status")
 }
 
-func Test_PowerOffVirtualMachine(t *testing.T) {
+func Test_PowerOff(t *testing.T) {
 	assert := require.New(t)
 	vmName, ok := os.LookupEnv("OS_VM_NAME")
 	assert.True(ok, "expected env variable VM_NAME to be set")
@@ -94,8 +95,22 @@ func Test_PowerOffVirtualMachine(t *testing.T) {
 			VirtualMachineName: vmName,
 		},
 	}
-	err := c.PowerOffVirtualMachine(vm)
+	err := c.PowerOff(vm)
 	assert.NoError(err, "expected no error during check of power status")
+}
+
+func Test_ShutdownGuest(t *testing.T) {
+	assert := require.New(t)
+	vmName, ok := os.LookupEnv("OS_VM_NAME")
+	assert.True(ok, "expected env variable VM_NAME to be set")
+	vm := &migration.VirtualMachineImport{
+		Spec: migration.VirtualMachineImportSpec{
+			VirtualMachineName: vmName,
+		},
+	}
+	err := c.ShutdownGuest(vm)
+	assert.Error(err, "expected to get error")
+	assert.Equal("shutdown guest OS is not supported by OpenStack", err.Error())
 }
 
 func Test_ExportVirtualMachine(t *testing.T) {
@@ -222,4 +237,17 @@ func Test_ExtendedServer(t *testing.T) {
 	assert.Equal(s.Name, "cirros-tiny", "expect name to be 'cirros-tiny'")
 	assert.Equal(s.Status, "", "expect status to be 'SHUTOFF'")
 	assert.Equal(s.Description, "test foo bar", "expect description to be 'test foo bar'")
+}
+
+func Test_SanitizeVirtualMachineImport(t *testing.T) {
+	assert := require.New(t)
+	vm := &migration.VirtualMachineImport{
+		Spec: migration.VirtualMachineImportSpec{
+			VirtualMachineName: "foo",
+			GracefulShutdown:   pointer.Bool(true),
+		},
+	}
+	err := c.SanitizeVirtualMachineImport(vm)
+	assert.Error(err, "expected to get error")
+	assert.Equal(err.Error(), "a graceful shutdown is done automatically by OpenStack; no need to activate the 'GracefulShutdown' option")
 }
