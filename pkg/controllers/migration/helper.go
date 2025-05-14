@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/util"
@@ -16,11 +16,11 @@ func evaluateDiskImportStatus(diskImportStatus []migration.DiskInfo) *migration.
 	failed := false
 	var failedCount, passedCount int
 	for _, d := range diskImportStatus {
-		ok = util.ConditionExists(d.DiskConditions, migration.VirtualMachineImageReady, v1.ConditionTrue) && ok
+		ok = util.ConditionExists(d.DiskConditions, migration.VirtualMachineImageReady, corev1.ConditionTrue) && ok
 		if ok {
 			passedCount++
 		}
-		failed = util.ConditionExists(d.DiskConditions, migration.VirtualMachineImageFailed, v1.ConditionTrue) || failed
+		failed = util.ConditionExists(d.DiskConditions, migration.VirtualMachineImageFailed, corev1.ConditionTrue) || failed
 		if failed {
 			failedCount++
 		}
@@ -74,7 +74,7 @@ func (h *virtualMachineHandler) reconcileDiskImageStatus(vm *migration.VirtualMa
 
 	ok := true
 	for _, d := range vm.Status.DiskImportStatus {
-		ok = util.ConditionExists(d.DiskConditions, migration.VirtualMachineImageSubmitted, v1.ConditionTrue) && ok
+		ok = util.ConditionExists(d.DiskConditions, migration.VirtualMachineImageSubmitted, corev1.ConditionTrue) && ok
 	}
 
 	if ok {
@@ -120,11 +120,11 @@ func (h *virtualMachineHandler) runVirtualMachineExport(vm *migration.VirtualMac
 	if err != nil {
 		return vm, err
 	}
-	if util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineExported, v1.ConditionTrue) {
+	if util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineExported, corev1.ConditionTrue) {
 		vm.Status.Status = migration.DisksExported
 	}
 
-	if util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineExportFailed, v1.ConditionTrue) {
+	if util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineExportFailed, corev1.ConditionTrue) {
 		vm.Status.Status = migration.VirtualMachineMigrationFailed
 	}
 

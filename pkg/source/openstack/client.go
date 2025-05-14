@@ -244,6 +244,12 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 		return err
 	}
 
+	logrus.WithFields(util.FieldsToJSON(logrus.Fields{
+		"name":      vm.Name,
+		"namespace": vm.Namespace,
+		"spec":      vmObj.AttachedVolumes,
+	}, []string{"spec"})).Info("Origin spec of the volumes to be imported")
+
 	// Helper function to do the export.
 	// This is necessary so that the defer functions are executed at the right
 	// time.
