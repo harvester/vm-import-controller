@@ -2,13 +2,13 @@ package migration
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	harvesterutil "github.com/harvester/harvester/pkg/util"
 	capiformat "sigs.k8s.io/cluster-api/util/labels/format"
 
 	"github.com/harvester/vm-import-controller/pkg/apis/common"
@@ -23,11 +23,10 @@ import (
 	harvester "github.com/harvester/harvester/pkg/generated/controllers/harvesterhci.io/v1beta1"
 	ctlcniv1 "github.com/harvester/harvester/pkg/generated/controllers/k8s.cni.cncf.io/v1"
 	kubevirtv1 "github.com/harvester/harvester/pkg/generated/controllers/kubevirt.io/v1"
-	"github.com/harvester/harvester/pkg/ref"
-	coreControllers "github.com/rancher/wrangler/pkg/generated/controllers/core/v1"
-	"github.com/rancher/wrangler/pkg/relatedresource"
+	coreControllers "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
+	"github.com/rancher/wrangler/v3/pkg/relatedresource"
 	"github.com/sirupsen/logrus"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,7 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 	kubevirt "kubevirt.io/api/core/v1"
 
-	storageControllers "github.com/rancher/wrangler/pkg/generated/controllers/storage/v1"
+	storageControllers "github.com/rancher/wrangler/v3/pkg/generated/controllers/storage/v1"
 )
 
 const (
@@ -314,7 +313,7 @@ func (h *virtualMachineHandler) triggerExport(vm *migration.VirtualMachineImport
 	}
 
 	// power off machine
-	if !util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweringOff, v1.ConditionTrue) {
+	if !util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweringOff, corev1.ConditionTrue) {
 		logrus.WithFields(logrus.Fields{
 			"name":                              vm.Name,
 			"namespace":                         vm.Namespace,
@@ -330,7 +329,7 @@ func (h *virtualMachineHandler) triggerExport(vm *migration.VirtualMachineImport
 		conds := []common.Condition{
 			{
 				Type:               migration.VirtualMachinePoweringOff,
-				Status:             v1.ConditionTrue,
+				Status:             corev1.ConditionTrue,
 				LastUpdateTime:     metav1.Now().Format(time.RFC3339),
 				LastTransitionTime: metav1.Now().Format(time.RFC3339),
 			},
@@ -339,8 +338,8 @@ func (h *virtualMachineHandler) triggerExport(vm *migration.VirtualMachineImport
 		return nil
 	}
 
-	if !util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweredOff, v1.ConditionTrue) &&
-		util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweringOff, v1.ConditionTrue) {
+	if !util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweredOff, corev1.ConditionTrue) &&
+		util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweringOff, corev1.ConditionTrue) {
 		// check if VM is powered off
 		ok, err := vmo.IsPoweredOff(vm)
 		if err != nil {
@@ -350,7 +349,7 @@ func (h *virtualMachineHandler) triggerExport(vm *migration.VirtualMachineImport
 			conds := []common.Condition{
 				{
 					Type:               migration.VirtualMachinePoweredOff,
-					Status:             v1.ConditionTrue,
+					Status:             corev1.ConditionTrue,
 					LastUpdateTime:     metav1.Now().Format(time.RFC3339),
 					LastTransitionTime: metav1.Now().Format(time.RFC3339),
 				},
@@ -363,10 +362,10 @@ func (h *virtualMachineHandler) triggerExport(vm *migration.VirtualMachineImport
 		return fmt.Errorf("waiting for vm %s to be powered off", fmt.Sprintf("%s/%s", vm.Namespace, vm.Name))
 	}
 
-	if util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweredOff, v1.ConditionTrue) &&
-		util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweringOff, v1.ConditionTrue) &&
-		!util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineExported, v1.ConditionTrue) &&
-		!util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineExportFailed, v1.ConditionTrue) {
+	if util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweredOff, corev1.ConditionTrue) &&
+		util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweringOff, corev1.ConditionTrue) &&
+		!util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineExported, corev1.ConditionTrue) &&
+		!util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineExportFailed, corev1.ConditionTrue) {
 		logrus.WithFields(logrus.Fields{
 			"name":                              vm.Name,
 			"namespace":                         vm.Namespace,
@@ -381,7 +380,7 @@ func (h *virtualMachineHandler) triggerExport(vm *migration.VirtualMachineImport
 			conds := []common.Condition{
 				{
 					Type:               migration.VirtualMachineExportFailed,
-					Status:             v1.ConditionTrue,
+					Status:             corev1.ConditionTrue,
 					LastUpdateTime:     metav1.Now().Format(time.RFC3339),
 					LastTransitionTime: metav1.Now().Format(time.RFC3339),
 					Message:            fmt.Sprintf("error exporting VM: %v", err),
@@ -401,7 +400,7 @@ func (h *virtualMachineHandler) triggerExport(vm *migration.VirtualMachineImport
 		conds := []common.Condition{
 			{
 				Type:               migration.VirtualMachineExported,
-				Status:             v1.ConditionTrue,
+				Status:             corev1.ConditionTrue,
 				LastUpdateTime:     metav1.Now().Format(time.RFC3339),
 				LastTransitionTime: metav1.Now().Format(time.RFC3339),
 			},
@@ -466,7 +465,7 @@ func (h *virtualMachineHandler) createVirtualMachineImages(vm *migration.Virtual
 	// check and create VirtualMachineImage objects
 	status := vm.Status.DeepCopy()
 	for i, d := range status.DiskImportStatus {
-		if !util.ConditionExists(d.DiskConditions, migration.VirtualMachineImageSubmitted, v1.ConditionTrue) {
+		if !util.ConditionExists(d.DiskConditions, migration.VirtualMachineImageSubmitted, corev1.ConditionTrue) {
 			vmiObj, err := h.checkAndCreateVirtualMachineImage(vm, d)
 			if err != nil {
 				return fmt.Errorf("error creating vmi: %v", err)
@@ -476,7 +475,7 @@ func (h *virtualMachineHandler) createVirtualMachineImages(vm *migration.Virtual
 			cond := []common.Condition{
 				{
 					Type:               migration.VirtualMachineImageSubmitted,
-					Status:             v1.ConditionTrue,
+					Status:             corev1.ConditionTrue,
 					LastUpdateTime:     metav1.Now().Format(time.RFC3339),
 					LastTransitionTime: metav1.Now().Format(time.RFC3339),
 				},
@@ -490,17 +489,17 @@ func (h *virtualMachineHandler) createVirtualMachineImages(vm *migration.Virtual
 
 func (h *virtualMachineHandler) reconcileVMIStatus(vm *migration.VirtualMachineImport) error {
 	for i, d := range vm.Status.DiskImportStatus {
-		if !util.ConditionExists(d.DiskConditions, migration.VirtualMachineImageReady, v1.ConditionTrue) {
+		if !util.ConditionExists(d.DiskConditions, migration.VirtualMachineImageReady, corev1.ConditionTrue) {
 			vmi, err := h.vmi.Get(vm.Namespace, d.VirtualMachineImage, metav1.GetOptions{})
 			if err != nil {
 				return fmt.Errorf("error quering vmi in reconcileVMIStatus: %v", err)
 			}
 			for _, v := range vmi.Status.Conditions {
-				if v.Type == harvesterv1beta1.ImageImported && v.Status == v1.ConditionTrue {
+				if v.Type == harvesterv1beta1.ImageImported && v.Status == corev1.ConditionTrue {
 					cond := []common.Condition{
 						{
 							Type:               migration.VirtualMachineImageReady,
-							Status:             v1.ConditionTrue,
+							Status:             corev1.ConditionTrue,
 							LastUpdateTime:     metav1.Now().Format(time.RFC3339),
 							LastTransitionTime: metav1.Now().Format(time.RFC3339),
 						},
@@ -510,11 +509,11 @@ func (h *virtualMachineHandler) reconcileVMIStatus(vm *migration.VirtualMachineI
 				}
 
 				// handle failed imports if any
-				if v.Type == harvesterv1beta1.ImageImported && v.Status == v1.ConditionFalse && v.Reason == "ImportFailed" {
+				if v.Type == harvesterv1beta1.ImageImported && v.Status == corev1.ConditionFalse && v.Reason == "ImportFailed" {
 					cond := []common.Condition{
 						{
 							Type:               migration.VirtualMachineImageFailed,
-							Status:             v1.ConditionTrue,
+							Status:             corev1.ConditionTrue,
 							LastUpdateTime:     metav1.Now().Format(time.RFC3339),
 							LastTransitionTime: metav1.Now().Format(time.RFC3339),
 						},
@@ -555,7 +554,7 @@ func (h *virtualMachineHandler) createVirtualMachine(vm *migration.VirtualMachin
 			Name: fmt.Sprintf("disk-%d", i),
 			VolumeSource: kubevirt.VolumeSource{
 				PersistentVolumeClaim: &kubevirt.PersistentVolumeClaimVolumeSource{
-					PersistentVolumeClaimVolumeSource: v1.PersistentVolumeClaimVolumeSource{
+					PersistentVolumeClaimVolumeSource: corev1.PersistentVolumeClaimVolumeSource{
 						ClaimName: pvcName,
 					},
 				},
@@ -635,12 +634,12 @@ func (h *virtualMachineHandler) ReconcileVMI(_ string, _ string, obj runtime.Obj
 func (h *virtualMachineHandler) cleanupAndResubmit(vm *migration.VirtualMachineImport) error {
 	// need to wait for all VMI's to be complete or failed before we cleanup failed objects
 	for i, d := range vm.Status.DiskImportStatus {
-		if util.ConditionExists(d.DiskConditions, migration.VirtualMachineImageFailed, v1.ConditionTrue) {
+		if util.ConditionExists(d.DiskConditions, migration.VirtualMachineImageFailed, corev1.ConditionTrue) {
 			err := h.vmi.Delete(vm.Namespace, d.VirtualMachineImage, &metav1.DeleteOptions{})
 			if err != nil {
 				return fmt.Errorf("error deleting failed virtualmachineimage: %v", err)
 			}
-			conds := util.RemoveCondition(d.DiskConditions, migration.VirtualMachineImageFailed, v1.ConditionTrue)
+			conds := util.RemoveCondition(d.DiskConditions, migration.VirtualMachineImageFailed, corev1.ConditionTrue)
 			d.DiskConditions = conds
 			vm.Status.DiskImportStatus[i] = d
 		}
@@ -657,7 +656,7 @@ func (h *virtualMachineHandler) findAndCreatePVC(vm *migration.VirtualMachineImp
 		}
 
 		// check if PVC has already been created
-		var createPVC bool
+		createPVC := false
 		pvcName := strings.ToLower(strings.Split(v.Name, ".img")[0])
 		_, err = h.pvc.Get(vm.Namespace, pvcName, metav1.GetOptions{})
 		if err != nil {
@@ -670,28 +669,25 @@ func (h *virtualMachineHandler) findAndCreatePVC(vm *migration.VirtualMachineImp
 		}
 
 		if createPVC {
-			annotations, err := generateAnnotations(vm, vmiObj)
-			if err != nil {
-				return err
-			}
-
-			pvcObj := &v1.PersistentVolumeClaim{
+			pvcObj := &corev1.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:        pvcName,
-					Namespace:   vm.Namespace,
-					Annotations: annotations,
-				},
-				Spec: v1.PersistentVolumeClaimSpec{
-					AccessModes: []v1.PersistentVolumeAccessMode{
-						v1.ReadWriteMany,
+					Name:      pvcName,
+					Namespace: vm.Namespace,
+					Annotations: map[string]string{
+						harvesterutil.AnnotationImageID: fmt.Sprintf("%s/%s", vmiObj.Namespace, vmiObj.Name),
 					},
-					Resources: v1.ResourceRequirements{
-						Requests: v1.ResourceList{
-							v1.ResourceStorage: resource.MustParse(fmt.Sprintf("%d", vmiObj.Status.Size)),
+				},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{
+						corev1.ReadWriteMany,
+					},
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceStorage: resource.MustParse(fmt.Sprintf("%d", vmiObj.Status.Size)),
 						},
 					},
 					StorageClassName: &vmiObj.Status.StorageClassName,
-					VolumeMode:       &[]v1.PersistentVolumeMode{v1.PersistentVolumeBlock}[0],
+					VolumeMode:       &[]corev1.PersistentVolumeMode{corev1.PersistentVolumeBlock}[0],
 				},
 			}
 
@@ -736,26 +732,6 @@ func (h *virtualMachineHandler) tidyUpObjects(vm *migration.VirtualMachineImport
 		os.Remove(filepath.Join(server.TempDir(), v.Name))
 	}
 	return nil
-}
-
-// generateAnnotations will generate the harvester reference annotations: github.com/harvester/harvester/pkg/ref
-func generateAnnotations(vm *migration.VirtualMachineImport, vmi *harvesterv1beta1.VirtualMachineImage) (map[string]string, error) {
-	annotationSchemaOwners := ref.AnnotationSchemaOwners{}
-	_ = annotationSchemaOwners.Add(kubevirt.VirtualMachineGroupVersionKind.GroupKind(), vm)
-	var schemaID = ref.GroupKindToSchemaID(kubevirt.VirtualMachineGroupVersionKind.GroupKind())
-	var ownerRef = ref.Construct(vm.GetNamespace(), vm.Status.ImportedVirtualMachineName)
-	schemaRef := ref.AnnotationSchemaReference{SchemaID: schemaID, References: ref.NewAnnotationSchemaOwnerReferences()}
-	schemaRef.References.Insert(ownerRef)
-	annotationSchemaOwners[schemaID] = schemaRef
-	var ownersBytes, err = json.Marshal(annotationSchemaOwners)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal annotation schema owners: %w", err)
-	}
-	annotations := map[string]string{
-		ref.AnnotationSchemaOwnerKeyName: string(ownersBytes),
-		"harvesterhci.io/imageId":        fmt.Sprintf("%s/%s", vmi.Namespace, vmi.Name),
-	}
-	return annotations, nil
 }
 
 func (h *virtualMachineHandler) checkAndCreateVirtualMachineImage(vm *migration.VirtualMachineImport, d migration.DiskInfo) (*harvesterv1beta1.VirtualMachineImage, error) {
@@ -809,10 +785,12 @@ func (h *virtualMachineHandler) checkAndCreateVirtualMachineImage(vm *migration.
 	}
 
 	if vm.Spec.StorageClass != "" {
-		// update storage class annotations
-		vmi.Annotations = map[string]string{
-			"harvesterhci.io/storageClassName": vm.Spec.StorageClass,
+		if vmi.Annotations == nil {
+			vmi.Annotations = make(map[string]string)
 		}
+		vmi.Annotations[harvesterutil.AnnotationStorageClassName] = vm.Spec.StorageClass
+		vmi.Spec.Backend = harvesterv1beta1.VMIBackendCDI
+		vmi.Spec.TargetStorageClassName = vm.Spec.StorageClass
 	}
 
 	logrus.WithFields(logrus.Fields{
