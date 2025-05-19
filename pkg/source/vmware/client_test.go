@@ -365,15 +365,16 @@ func Test_identifyNetworkCards(t *testing.T) {
 	err = vmObj.Properties(c.ctx, vmObj.Reference(), []string{}, &o)
 	assert.NoError(err, "expected no error looking up vmObj properties")
 
-	networkInfo := identifyNetworkCards(o.Config.Hardware.Device)
+	networkInfo := identifyNetworkCards(c.networkMapping, o.Config.Hardware.Device)
 	assert.Len(networkInfo, 1, "expected to find only 1 item in the networkInfo")
+	t.Log(networkInfo)
 	networkMapping := []migration.NetworkMapping{
 		{
 			SourceNetwork:      "dummyNetwork",
 			DestinationNetwork: "harvester1",
 		},
 		{
-			SourceNetwork:      "DVSwitch: fea97929-4b2d-5972-b146-930c6d0b4014",
+			SourceNetwork:      "DC0_DVPG0",
 			DestinationNetwork: "pod-network",
 		},
 	}

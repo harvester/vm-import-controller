@@ -30,9 +30,10 @@ type VirtualMachineImportSpec struct {
 	// Examples: "vm-1234", "my-VM" or "5649cac7-3871-4bb5-aab6-c72b8c18d0a2"
 	VirtualMachineName string `json:"virtualMachineName"`
 
-	Folder       string           `json:"folder,omitempty"`
-	Mapping      []NetworkMapping `json:"networkMapping,omitempty"` //If empty new VirtualMachineImport will be mapped to Management Network
-	StorageClass string           `json:"storageClass,omitempty"`
+	Folder              string           `json:"folder,omitempty"`
+	Mapping             []NetworkMapping `json:"networkMapping,omitempty"` //If empty new VirtualMachineImport will be mapped to Management Network
+	StorageClass        string           `json:"storageClass,omitempty"`
+	SkipPreflightChecks bool             `json:"skipPreflightChecks,omitemtpy"`
 }
 
 // VirtualMachineImportStatus tracks the status of the VirtualMachineImport export from migration and import into the Harvester cluster
