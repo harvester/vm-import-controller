@@ -236,6 +236,12 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 		return err
 	}
 
+	logrus.WithFields(util.FieldsToJSON(logrus.Fields{
+		"name":      vm.Name,
+		"namespace": vm.Namespace,
+		"spec":      vmObj.AttachedVolumes,
+	}, []string{"spec"})).Info("Origin spec of the volumes to be imported")
+
 	for vIndex, v := range vmObj.AttachedVolumes {
 		imageName := fmt.Sprintf("import-controller-%s-%d", vm.Spec.VirtualMachineName, vIndex)
 
