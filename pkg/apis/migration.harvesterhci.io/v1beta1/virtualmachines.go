@@ -125,13 +125,13 @@ const (
 )
 
 func (in *VirtualMachineImport) GetDefaultDiskBusType() kubevirtv1.DiskBus {
-	return ptr.Deref[kubevirtv1.DiskBus](in.Spec.DefaultDiskBusType, kubevirtv1.DiskBusVirtio)
+	return ptr.Deref(in.Spec.DefaultDiskBusType, kubevirtv1.DiskBusVirtio)
 }
 
 func (in *VirtualMachineImport) GetDefaultNetworkInterfaceModel() string {
-	return ptr.Deref[string](in.Spec.DefaultNetworkInterfaceModel, NetworkInterfaceModelVirtio)
+	return ptr.Deref(in.Spec.DefaultNetworkInterfaceModel, NetworkInterfaceModelVirtio)
 }
 
 func (in *NetworkMapping) GetNetworkInterfaceModel() string {
-	return ptr.Deref[string](in.NetworkInterfaceModel, NetworkInterfaceModelVirtio)
+	return ptr.Deref(in.NetworkInterfaceModel, NetworkInterfaceModelVirtio)
 }

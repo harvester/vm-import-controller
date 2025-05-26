@@ -1,7 +1,7 @@
 package source
 
 import (
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	kubevirt "kubevirt.io/api/core/v1"
 )
 
@@ -9,12 +9,12 @@ func VMSpecSetupUEFISettings(vmSpec *kubevirt.VirtualMachineSpec, secureBoot, tp
 	firmware := &kubevirt.Firmware{
 		Bootloader: &kubevirt.Bootloader{
 			EFI: &kubevirt.EFI{
-				SecureBoot: pointer.Bool(false),
+				SecureBoot: ptr.To(false),
 			},
 		},
 	}
 	if secureBoot {
-		firmware.Bootloader.EFI.SecureBoot = pointer.Bool(true)
+		firmware.Bootloader.EFI.SecureBoot = ptr.To(true)
 	}
 	vmSpec.Template.Spec.Domain.Firmware = firmware
 	if tpm {
@@ -22,7 +22,7 @@ func VMSpecSetupUEFISettings(vmSpec *kubevirt.VirtualMachineSpec, secureBoot, tp
 	}
 	if secureBoot || tpm {
 		vmSpec.Template.Spec.Domain.Features.SMM = &kubevirt.FeatureState{
-			Enabled: pointer.Bool(true),
+			Enabled: ptr.To(true),
 		}
 	}
 }
