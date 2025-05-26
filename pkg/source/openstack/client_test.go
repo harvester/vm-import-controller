@@ -126,8 +126,9 @@ func Test_GenerateVirtualMachine(t *testing.T) {
 	assert.NoError(err, "expected no error during GenerateVirtualMachine")
 	assert.NotEmpty(newVM.Spec.Template.Spec.Domain.CPU, "expected CPU's to not be empty")
 	assert.NotEmpty(newVM.Spec.Template.Spec.Domain.Resources.Limits.Memory(), "expected memory limit to not be empty")
-	assert.NotEmpty(newVM.Spec.Template.Spec.Networks, "expected to find atleast 1 network as pod network should have been applied")
-	assert.NotEmpty(newVM.Spec.Template.Spec.Domain.Devices.Interfaces, "expected to find atleast 1 interface for pod-network")
+	assert.NotEmpty(newVM.Spec.Template.Spec.Networks, "expected to find at least 1 network as pod network should have been applied")
+	assert.NotEmpty(newVM.Spec.Template.Spec.Domain.Devices.Interfaces, "expected to find at least 1 interface for pod-network")
+	assert.Equal(newVM.Spec.Template.Spec.Domain.Devices.Interfaces[0].Model, migration.NetworkInterfaceModelVirtio, "expected to have a NIC with virtio model")
 }
 
 func Test_generateNetworkInfo(t *testing.T) {
@@ -137,10 +138,11 @@ func Test_generateNetworkInfo(t *testing.T) {
 	err := json.Unmarshal(networkInfoByte, &networkInfoMap)
 	assert.NoError(err, "expected no error while unmarshalling network info")
 
-	vmInterfaceDetails, err := generateNetworkInfo(networkInfoMap)
+	vmInterfaceDetails, err := generateNetworkInfos(networkInfoMap, migration.NetworkInterfaceModelVirtio)
 	assert.NoError(err, "expected no error while generating network info")
 	assert.Len(vmInterfaceDetails, 2, "expected to find 2 interfaces only")
-
+	assert.Equal(vmInterfaceDetails[0].Model, migration.NetworkInterfaceModelVirtio, "expected to have a NIC with virtio model")
+	assert.Equal(vmInterfaceDetails[1].Model, migration.NetworkInterfaceModelVirtio, "expected to have a NIC with virtio model")
 }
 
 func Test_ClientOptions(t *testing.T) {
