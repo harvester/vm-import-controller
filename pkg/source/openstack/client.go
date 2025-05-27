@@ -252,8 +252,8 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 				"name":                    vm.Name,
 				"namespace":               vm.Namespace,
 				"spec.virtualMachineName": vm.Spec.VirtualMachineName,
-				"snapshot.id":             ptr.Deref[snapshots.Snapshot](snapshot, snapshots.Snapshot{}).ID,
-				"volume.id":               ptr.Deref[volumes.Volume](volume, volumes.Volume{}).ID,
+				"snapshot.id":             ptr.Deref(snapshot, snapshots.Snapshot{}).ID,
+				"volume.id":               ptr.Deref(volume, volumes.Volume{}).ID,
 				"volumeImage.imageID":     volumeImage.ImageID,
 			}).Info("Cleaning up resources on OpenStack source")
 
