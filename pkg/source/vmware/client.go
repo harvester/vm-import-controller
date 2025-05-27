@@ -189,6 +189,8 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 				i.Path = vm.Name + "-" + vm.Namespace + "-" + i.Path
 			}
 
+			busType := detectDiskBusType(i.DeviceId, vm.GetDefaultDiskBusType())
+
 			logrus.WithFields(logrus.Fields{
 				"name":                    vm.Name,
 				"namespace":               vm.Namespace,
@@ -197,6 +199,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 				"spec.sourceCluster.kind": vm.Spec.SourceCluster.Kind,
 				"deviceId":                i.DeviceId,
 				"path":                    i.Path,
+				"busType":                 busType,
 				"size":                    i.Size,
 			}).Info("Downloading an image")
 
@@ -208,7 +211,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 			vm.Status.DiskImportStatus = append(vm.Status.DiskImportStatus, migration.DiskInfo{
 				Name:     i.Path,
 				DiskSize: i.Size,
-				BusType:  adapterType(i.DeviceId),
+				BusType:  busType,
 			})
 		} else {
 			logrus.WithFields(logrus.Fields{
@@ -444,14 +447,51 @@ func generateNetworkInfos(devices []types.BaseVirtualDevice) []source.NetworkInf
 	return result
 }
 
-// adapterType tries to identify the disk bus type from vmware
-// to attempt and set correct bus types in kubevirt
-// default is to switch to SATA to ensure device boots
-func adapterType(deviceID string) kubevirt.DiskBus {
-	if strings.Contains(deviceID, "SCSI") {
+// detectDiskBusType tries to identify the disk bus type from VMware to attempt and
+// set correct bus types in KubeVirt. Defaults to the specified bus type in `def`
+// if auto-detection fails.
+// Examples:
+// .--------------------------------------------------.
+// | Bus  | Device ID                                 |
+// |------|-------------------------------------------|
+// | SCSI | /vm-13010/ParaVirtualSCSIController0:0    |
+// | SCSI | /vm-13011/VirtualBusLogicController0:0    |
+// | SCSI | /vm-13012/VirtualLsiLogicController0:0    |
+// | SCSI | /vm-13013/VirtualLsiLogicSASController0:0 |
+// | SATA | /vm-13767/VirtualAHCIController0:1        |
+// | IDE  | /vm-5678/VirtualIDEController1:0          |
+// | NVMe | /vm-2468/VirtualNVMEController0:0         |
+// | USB  | /vm-54321/VirtualUSBController0:0         |
+// '--------------------------------------------------'
+// References:
+// - https://github.com/vmware/pyvmomi/tree/master/pyVmomi/vim/vm/device
+// - https://vdc-download.vmware.com/vmwb-repository/dcr-public/d1902b0e-d479-46bf-8ac9-cee0e31e8ec0/07ce8dbd-db48-4261-9b8f-c6d3ad8ba472/vim.vm.device.VirtualSCSIController.html
+// - https://libvirt.org/formatdomain.html#controllers
+// - https://kubevirt.io/api-reference/v1.1.0/definitions.html#_v1_disktarget
+func detectDiskBusType(deviceID string, def kubevirt.DiskBus) kubevirt.DiskBus {
+	deviceID = strings.ToLower(deviceID)
+	switch {
+	case strings.Contains(deviceID, "paravirtualscsi"):
+		// The pvscsi (Paravirtual SCSI) controller cannot be mapped to
+		// SCSI bus type because in KubeVirt it is not possible to specify
+		// the exact model (pvscsi, lsilogic, ...) of the disk via the
+		// VirtualMachine API. Attempting to map pvscsi to SCSI prevents
+		// the VM from booting.
+		// As a workaround, the SATA bus type is utilized in such case.
+		// Note, VirtIO would be better, but it is not said that the
+		// required drivers are installed in the VM.
+		return kubevirt.DiskBusSATA
+	case strings.Contains(deviceID, "scsi"), strings.Contains(deviceID, "buslogic"), strings.Contains(deviceID, "lsilogic"):
 		return kubevirt.DiskBusSCSI
+	case strings.Contains(deviceID, "ahci"), strings.Contains(deviceID, "sata"), strings.Contains(deviceID, "ide"):
+		return kubevirt.DiskBusSATA
+	case strings.Contains(deviceID, "nvme"):
+		return kubevirt.DiskBusVirtio
+	case strings.Contains(deviceID, "usb"):
+		return kubevirt.DiskBusUSB
+	default:
+		return def
 	}
-	return kubevirt.DiskBusSATA
 }
 
 // SanitizeVirtualMachineImport is used to sanitize the VirtualMachineImport object.
