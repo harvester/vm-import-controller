@@ -21,7 +21,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	kubevirt "kubevirt.io/api/core/v1"
 
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
@@ -354,7 +354,7 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 					},
 					Features: &kubevirt.Features{
 						ACPI: kubevirt.FeatureState{
-							Enabled: pointer.Bool(true),
+							Enabled: ptr.To(true),
 						},
 					},
 				},
@@ -369,9 +369,9 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 	uefi := strings.EqualFold(o.Config.Firmware, string(types.GuestOsDescriptorFirmwareTypeEfi))
 	secureBoot := false
 	if o.Config.BootOptions != nil {
-		secureBoot = pointer.BoolDeref(o.Config.BootOptions.EfiSecureBootEnabled, false)
+		secureBoot = ptr.Deref(o.Config.BootOptions.EfiSecureBootEnabled, false)
 	}
-	tpm := pointer.BoolDeref(o.Summary.Config.TpmPresent, false)
+	tpm := ptr.Deref(o.Summary.Config.TpmPresent, false)
 	if uefi {
 		source.VMSpecSetupUEFISettings(&vmSpec, secureBoot, tpm)
 	}

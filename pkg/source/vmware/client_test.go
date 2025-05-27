@@ -15,7 +15,7 @@ import (
 	"github.com/vmware/govmomi/vim25/types"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	kubevirt "kubevirt.io/api/core/v1"
 
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
@@ -319,7 +319,7 @@ func Test_GenerateVirtualMachine_secureboot(t *testing.T) {
 		GuestId:  string(types.VirtualMachineGuestOsIdentifierOtherGuest64),
 		Firmware: string(types.GuestOsDescriptorFirmwareTypeEfi),
 		BootOptions: &types.VirtualMachineBootOptions{
-			EfiSecureBootEnabled: pointer.Bool(true),
+			EfiSecureBootEnabled: ptr.To(true),
 		},
 		Files: &types.VirtualMachineFileInfo{
 			VmPathName: fmt.Sprintf("[%s] %s", ds.Name(), vm.Spec.VirtualMachineName),
@@ -377,7 +377,7 @@ func Test_identifyNetworkCards(t *testing.T) {
 		{
 			SourceNetwork:         "DVSwitch: fea97929-4b2d-5972-b146-930c6d0b4014",
 			DestinationNetwork:    "pod-network",
-			NetworkInterfaceModel: pointer.String(migration.NetworkInterfaceModelRtl8139),
+			NetworkInterfaceModel: ptr.To(migration.NetworkInterfaceModelRtl8139),
 		},
 	}
 
