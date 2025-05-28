@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	kubevirt "kubevirt.io/api/core/v1"
 
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
@@ -235,13 +236,75 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 		return err
 	}
 
-	for vIndex, v := range vmObj.AttachedVolumes {
-		imageName := fmt.Sprintf("import-controller-%s-%d", vm.Spec.VirtualMachineName, vIndex)
+	// Helper function to do the export.
+	// This is necessary so that the defer functions are executed at the right
+	// time.
+	exportFn := func(index int, av servers.AttachedVolume) error {
+		var snapshot *snapshots.Snapshot
+		var volume *volumes.Volume
+		var volumeImage volumes.VolumeImage
+
+		imageName := fmt.Sprintf("import-controller-%s-%d", vm.Spec.VirtualMachineName, index)
+
+		// Make sure the snapshot, volume and volume image are cleaned up in any case.
+		defer func() {
+			logrus.WithFields(logrus.Fields{
+				"name":                    vm.Name,
+				"namespace":               vm.Namespace,
+				"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+				"snapshot.id":             ptr.Deref(snapshot, snapshots.Snapshot{}).ID,
+				"volume.id":               ptr.Deref(volume, volumes.Volume{}).ID,
+				"volumeImage.imageID":     volumeImage.ImageID,
+			}).Info("Cleaning up resources on OpenStack source")
+
+			if len(volumeImage.ImageID) > 0 {
+				if err := images.Delete(c.ctx, c.imageClient, volumeImage.ImageID).ExtractErr(); err != nil {
+					logrus.WithFields(logrus.Fields{
+						"name":                    vm.Name,
+						"namespace":               vm.Namespace,
+						"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+						"image.id":                volumeImage.ImageID,
+					}).Errorf("Failed to delete image: %v", err)
+				}
+			}
+
+			if volume != nil {
+				if err := volumes.Delete(c.ctx, c.storageClient, volume.ID, volumes.DeleteOpts{}).ExtractErr(); err != nil {
+					logrus.WithFields(logrus.Fields{
+						"name":                    vm.Name,
+						"namespace":               vm.Namespace,
+						"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+						"volume.id":               volume.ID,
+					}).Errorf("Failed to delete volume: %v", err)
+				}
+			}
+
+			if snapshot != nil {
+				if err := snapshots.Delete(c.ctx, c.storageClient, snapshot.ID).ExtractErr(); err != nil {
+					logrus.WithFields(logrus.Fields{
+						"name":                    vm.Name,
+						"namespace":               vm.Namespace,
+						"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+						"snapshot.id":             snapshot.ID,
+						"snapshot.name":           snapshot.Name,
+						"snapshot.volumeID":       snapshot.VolumeID,
+					}).Errorf("Failed to delete snapshot: %v", err)
+				}
+			}
+		}()
+
+		logrus.WithFields(logrus.Fields{
+			"name":                    vm.Name,
+			"namespace":               vm.Namespace,
+			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+			"opts.name":               imageName,
+			"opts.volumeID":           av.ID,
+		}).Info("Creating a new snapshot")
 
 		// create snapshot for volume
-		snapInfo, err := snapshots.Create(c.ctx, c.storageClient, snapshots.CreateOpts{
+		snapshot, err = snapshots.Create(c.ctx, c.storageClient, snapshots.CreateOpts{
 			Name:     imageName,
-			VolumeID: v.ID,
+			VolumeID: av.ID,
 			Force:    true,
 		}).Extract()
 		// snapshot creation is async, so call returns a 202 error when successful.
@@ -254,21 +317,22 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			"name":                    vm.Name,
 			"namespace":               vm.Namespace,
 			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
-			"snapshot.id":             snapInfo.ID,
-			"snapshot.name":           snapInfo.Name,
-			"snapshot.size":           snapInfo.Size,
+			"snapshot.id":             snapshot.ID,
+			"snapshot.name":           snapshot.Name,
+			"snapshot.volumeID":       snapshot.VolumeID,
+			"snapshot.size":           snapshot.Size,
 		}).Info("Waiting for snapshot to be available")
 
 		ctxWithTimeout1, cancel1 := context.WithTimeout(c.ctx, pollingTimeout)
 		defer cancel1()
 
-		if err := snapshots.WaitForStatus(ctxWithTimeout1, c.storageClient, snapInfo.ID, "available"); err != nil {
-			return fmt.Errorf("timeout waiting for snapshot %s to be available: %v", snapInfo.ID, err)
+		if err := snapshots.WaitForStatus(ctxWithTimeout1, c.storageClient, snapshot.ID, "available"); err != nil {
+			return fmt.Errorf("timeout waiting for snapshot %s to be available: %w", snapshot.ID, err)
 		}
 
-		volObj, err := volumes.Create(c.ctx, c.storageClient, volumes.CreateOpts{
-			SnapshotID: snapInfo.ID,
-			Size:       snapInfo.Size,
+		volume, err = volumes.Create(c.ctx, c.storageClient, volumes.CreateOpts{
+			SnapshotID: snapshot.ID,
+			Size:       snapshot.Size,
 		}, nil).Extract()
 		if err != nil {
 			return err
@@ -278,11 +342,11 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			"name":                    vm.Name,
 			"namespace":               vm.Namespace,
 			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
-			"volume.id":               volObj.ID,
-			"volume.createdAt":        volObj.CreatedAt,
-			"volume.snapshotID":       volObj.SnapshotID,
-			"volume.size":             volObj.Size,
-			"volume.status":           volObj.Status,
+			"volume.id":               volume.ID,
+			"volume.createdAt":        volume.CreatedAt,
+			"volume.snapshotID":       volume.SnapshotID,
+			"volume.size":             volume.Size,
+			"volume.status":           volume.Status,
 			"retryCount":              c.options.UploadImageRetryCount,
 			"retryDelay":              c.options.UploadImageRetryDelay,
 		}).Info("Waiting for volume to be available")
@@ -290,92 +354,103 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 		ctxWithTimeout2, cancel2 := context.WithTimeout(c.ctx, pollingTimeout)
 		defer cancel2()
 
-		if err := volumes.WaitForStatus(ctxWithTimeout2, c.storageClient, volObj.ID, "available"); err != nil {
-			return fmt.Errorf("timeout waiting for volume %s to be available: %v", volObj.ID, err)
+		if err := volumes.WaitForStatus(ctxWithTimeout2, c.storageClient, volume.ID, "available"); err != nil {
+			return fmt.Errorf("timeout waiting for volume %s to be available: %w", volume.ID, err)
 		}
 
 		logrus.WithFields(logrus.Fields{
 			"name":                    vm.Name,
 			"namespace":               vm.Namespace,
 			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
-			"spec.sourceCluster.name": vm.Spec.SourceCluster.Name,
-			"spec.sourceCluster.kind": vm.Spec.SourceCluster.Kind,
-			"attachedVolumeID":        v.ID,
+			"volume.id":               volume.ID,
+			"opts.imagename":          imageName,
 		}).Info("Creating a new image from a volume")
 
-		volImage, err := volumes.UploadImage(c.ctx, c.storageClient, volObj.ID, volumes.UploadImageOpts{
+		volumeImage, err = volumes.UploadImage(c.ctx, c.storageClient, volume.ID, volumes.UploadImageOpts{
 			ImageName:  imageName,
 			DiskFormat: "raw",
 		}).Extract()
 		if err != nil {
-			return fmt.Errorf("error while uploading volume image: %v", err)
+			return fmt.Errorf("error while uploading image: %w", err)
 		}
 
 		// wait for image to be ready
+		isImageActive := false
 		for i := 0; i < c.options.UploadImageRetryCount; i++ {
-			imgObj, err := images.Get(c.ctx, c.imageClient, volImage.ImageID).Extract()
+			imgObj, err := images.Get(c.ctx, c.imageClient, volumeImage.ImageID).Extract()
 			if err != nil {
-				return fmt.Errorf("error checking status of volume image %s: %v", volImage.ImageID, err)
+				logrus.WithFields(logrus.Fields{
+					"name":                    vm.Name,
+					"namespace":               vm.Namespace,
+					"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+					"image.id":                volumeImage.ImageID,
+				}).Errorf("Failed to get image: %v", err)
+			} else {
+				if imgObj.Status == images.ImageStatusActive {
+					isImageActive = true
+					break
+				}
 			}
-			if imgObj.Status == "active" {
-				break
-			}
+
 			logrus.WithFields(logrus.Fields{
 				"name":                    vm.Name,
 				"namespace":               vm.Namespace,
 				"spec.virtualMachineName": vm.Spec.VirtualMachineName,
 				"image.id":                imgObj.ID,
 				"image.status":            imgObj.Status,
-			}).Info("Waiting for raw image to be available")
+				"retryCount":              c.options.UploadImageRetryCount,
+				"retryDelay":              c.options.UploadImageRetryDelay,
+				"retryIndex":              i,
+			}).Infof("Waiting for image status to be '%s'", images.ImageStatusActive)
+
 			time.Sleep(time.Duration(c.options.UploadImageRetryDelay) * time.Second)
 		}
+		if !isImageActive {
+			return fmt.Errorf("timeout waiting for status '%s' of image %s", images.ImageStatusActive, volumeImage.ImageID)
+		}
 
 		logrus.WithFields(logrus.Fields{
 			"name":                    vm.Name,
 			"namespace":               vm.Namespace,
 			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
-			"spec.sourceCluster.name": vm.Spec.SourceCluster.Name,
-			"spec.sourceCluster.kind": vm.Spec.SourceCluster.Kind,
-			"imageID":                 volImage.ImageID,
+			"imageID":                 volumeImage.ImageID,
 		}).Info("Downloading an image")
 
-		contents, err := imagedata.Download(c.ctx, c.imageClient, volImage.ImageID).Extract()
+		contents, err := imagedata.Download(c.ctx, c.imageClient, volumeImage.ImageID).Extract()
 		if err != nil {
-			return fmt.Errorf("error downloading volume image %s: %v", volImage.ImageID, err)
+			return fmt.Errorf("error downloading image %s: %w", volumeImage.ImageID, err)
 		}
 
-		rawImageFileName := generateRawImageFileName(vm.Status.ImportedVirtualMachineName, vIndex)
+		rawImageFileName := generateRawImageFileName(vm.Status.ImportedVirtualMachineName, index)
 
 		logrus.WithFields(logrus.Fields{
 			"name":                    vm.Name,
 			"namespace":               vm.Namespace,
 			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
-			"volume.imageID":          volImage.ImageID,
+			"volume.imageID":          volumeImage.ImageID,
 			"rawImageFileName":        rawImageFileName,
 		}).Info("Downloading RAW image")
+
 		err = writeRawImageFile(filepath.Join(server.TempDir(), rawImageFileName), contents)
 		if err != nil {
-			return fmt.Errorf("error downloading RAW image %s: %v", rawImageFileName, err)
-		}
-
-		if err := volumes.Delete(c.ctx, c.storageClient, volObj.ID, volumes.DeleteOpts{}).ExtractErr(); err != nil {
-			return fmt.Errorf("error deleting volume %s: %v", volObj.ID, err)
-		}
-
-		if err := snapshots.Delete(c.ctx, c.storageClient, snapInfo.ID).ExtractErr(); err != nil {
-			return fmt.Errorf("error deleting snapshot %s: %v", snapInfo.ID, err)
-		}
-
-		if err := images.Delete(c.ctx, c.imageClient, volImage.ImageID).ExtractErr(); err != nil {
-			return fmt.Errorf("error deleting image %s: %v", volImage.ImageID, err)
+			return fmt.Errorf("error downloading RAW image %s: %w", rawImageFileName, err)
 		}
 
 		vm.Status.DiskImportStatus = append(vm.Status.DiskImportStatus, migration.DiskInfo{
 			Name:          rawImageFileName,
-			DiskSize:      int64(volObj.Size),
+			DiskSize:      int64(volume.Size),
 			DiskLocalPath: server.TempDir(),
 			BusType:       kubevirt.DiskBusVirtio,
 		})
+
+		return nil
+	}
+
+	for index, av := range vmObj.AttachedVolumes {
+		err := exportFn(index, av)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
