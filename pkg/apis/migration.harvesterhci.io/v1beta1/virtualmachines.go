@@ -4,6 +4,7 @@ import (
 	"github.com/rancher/wrangler/pkg/condition"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
@@ -48,6 +49,20 @@ type VirtualMachineImportSpec struct {
 	// therefore it always makes use of this field.
 	// Defaults to "virtio".
 	DefaultDiskBusType *kubevirtv1.DiskBus `json:"defaultDiskBusType,omitempty"`
+
+	// +optional
+	// ForcePowerOff is a flag to indicate whether the VM should be powered
+	// off forcefully before the export is started. By default, the VM import
+	// controller will try to perform a graceful shutdown of the VM guest OS.
+	// Defaults to false.
+	// Please note that this field only applies to VMware imports.
+	ForcePowerOff *bool `json:"forcePowerOff,omitempty"`
+
+	// GracefulShutdownTimeoutSeconds is the time to wait for the VM guest OS
+	// to be shutdown gracefully before a hard power off is triggered.
+	// Defaults to 60 seconds.
+	// Please note that this field only applies to VMware imports.
+	GracefulShutdownTimeoutSeconds int32 `json:"gracefulShutdownTimeoutSeconds,omitempty"`
 }
 
 // VirtualMachineImportStatus tracks the status of the VirtualMachineImport export from migration and import into the Harvester cluster
@@ -102,6 +117,7 @@ const (
 	VirtualMachineRunning         ImportStatus   = "virtualMachineRunning"
 	VirtualMachineImportValid     ImportStatus   = "virtualMachineImportValid"
 	VirtualMachineImportInvalid   ImportStatus   = "virtualMachineImportInvalid"
+	VirtualMachineShutdownGuest   condition.Cond = "VMShutdownGuest"
 	VirtualMachinePoweringOff     condition.Cond = "VMPoweringOff"
 	VirtualMachinePoweredOff      condition.Cond = "VMPoweredOff"
 	VirtualMachineExported        condition.Cond = "VMExported"
@@ -124,12 +140,35 @@ const (
 	NetworkInterfaceModelVirtio  = "virtio"
 )
 
+const (
+	DefaultGracefulShutdownTimeoutSeconds = 60
+)
+
 func (in *VirtualMachineImport) GetDefaultDiskBusType() kubevirtv1.DiskBus {
 	return ptr.Deref(in.Spec.DefaultDiskBusType, kubevirtv1.DiskBusVirtio)
 }
 
 func (in *VirtualMachineImport) GetDefaultNetworkInterfaceModel() string {
 	return ptr.Deref(in.Spec.DefaultNetworkInterfaceModel, NetworkInterfaceModelVirtio)
+}
+
+func (in *VirtualMachineImport) GetForcePowerOff() bool {
+	return ptr.Deref(in.Spec.ForcePowerOff, false)
+}
+
+func (in *VirtualMachineImport) GetGracefulShutdownTimeoutSeconds() int32 {
+	timeout := in.Spec.GracefulShutdownTimeoutSeconds
+	if timeout <= 0 {
+		timeout = DefaultGracefulShutdownTimeoutSeconds
+	}
+	return timeout
+}
+
+func (in *VirtualMachineImport) NamespacedName() string {
+	return types.NamespacedName{
+		Namespace: in.Namespace,
+		Name:      in.Name,
+	}.String()
 }
 
 func (in *NetworkMapping) GetNetworkInterfaceModel() string {

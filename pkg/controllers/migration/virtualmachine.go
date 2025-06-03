@@ -53,8 +53,14 @@ type VirtualMachineOperations interface {
 	// Any image format conversion will be performed by the VM Operation
 	ExportVirtualMachine(vm *migration.VirtualMachineImport) error
 
-	// PowerOffVirtualMachine is responsible for the powering off the virtual machine
-	PowerOffVirtualMachine(vm *migration.VirtualMachineImport) error
+	// ShutdownGuest is responsible for powering off the virtual machine by shutting down the guest OS
+	ShutdownGuest(vm *migration.VirtualMachineImport) error
+
+	// PowerOff is responsible for the powering off the virtual machine
+	PowerOff(vm *migration.VirtualMachineImport) error
+
+	// IsPowerOffSupported checks if the source cluster supports powering off the VM
+	IsPowerOffSupported() bool
 
 	// IsPoweredOff will check the status of VM Power and return true if machine is powered off
 	IsPoweredOff(vm *migration.VirtualMachineImport) (bool, error)
@@ -307,44 +313,80 @@ func (h *virtualMachineHandler) preFlightChecks(vm *migration.VirtualMachineImpo
 	return nil
 }
 
+// triggerShutdownGuest triggers the shutdown of the guest OS of the source VM.
+func triggerShutdownGuest(vm *migration.VirtualMachineImport, vmo VirtualMachineOperations) error {
+	logrus.WithFields(logrus.Fields{
+		"name":                                vm.Name,
+		"namespace":                           vm.Namespace,
+		"spec.virtualMachineName":             vm.Spec.VirtualMachineName,
+		"spec.sourceCluster.kind":             vm.Spec.SourceCluster.Kind,
+		"spec.sourceCluster.name":             vm.Spec.SourceCluster.Name,
+		"spec.gracefulShutdownTimeoutSeconds": vm.GetGracefulShutdownTimeoutSeconds(),
+	}).Info("Shutting down guest OS of the source VM")
+	err := vmo.ShutdownGuest(vm)
+	if err != nil {
+		return fmt.Errorf("failed to shutdown the guest OS of the source VM: %w", err)
+	}
+	conds := []common.Condition{
+		{
+			Type:               migration.VirtualMachineShutdownGuest,
+			Status:             v1.ConditionTrue,
+			LastUpdateTime:     metav1.Now().Format(time.RFC3339),
+			LastTransitionTime: metav1.Now().Format(time.RFC3339),
+		},
+	}
+	vm.Status.ImportConditions = util.MergeConditions(vm.Status.ImportConditions, conds)
+	return nil
+}
+
+// triggerPowerOff triggers the power off of the source VM.
+func triggerPowerOff(vm *migration.VirtualMachineImport, vmo VirtualMachineOperations) error {
+	logrus.WithFields(logrus.Fields{
+		"name":                    vm.Name,
+		"namespace":               vm.Namespace,
+		"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+		"spec.sourceCluster.kind": vm.Spec.SourceCluster.Kind,
+		"spec.sourceCluster.name": vm.Spec.SourceCluster.Name,
+	}).Info("Powering off the source VM")
+	err := vmo.PowerOff(vm)
+	if err != nil {
+		return fmt.Errorf("failed to power off the source VM: %w", err)
+	}
+	conds := []common.Condition{
+		{
+			Type:               migration.VirtualMachinePoweringOff,
+			Status:             v1.ConditionTrue,
+			LastUpdateTime:     metav1.Now().Format(time.RFC3339),
+			LastTransitionTime: metav1.Now().Format(time.RFC3339),
+		},
+	}
+	vm.Status.ImportConditions = util.MergeConditions(vm.Status.ImportConditions, conds)
+	return nil
+}
+
 func (h *virtualMachineHandler) triggerExport(vm *migration.VirtualMachineImport) error {
 	vmo, err := h.generateVMO(vm)
 	if err != nil {
 		return fmt.Errorf("error generating VMO in trigger export: %v", err)
 	}
 
-	// power off machine
-	if !util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweringOff, v1.ConditionTrue) {
-		logrus.WithFields(logrus.Fields{
-			"name":                              vm.Name,
-			"namespace":                         vm.Namespace,
-			"spec.virtualMachineName":           vm.Spec.VirtualMachineName,
-			"spec.sourceCluster.kind":           vm.Spec.SourceCluster.Kind,
-			"spec.sourceCluster.name":           vm.Spec.SourceCluster.Name,
-			"status.importedVirtualMachineName": vm.Status.ImportedVirtualMachineName,
-		}).Info("Power off the source VM")
-		err = vmo.PowerOffVirtualMachine(vm)
-		if err != nil {
-			return fmt.Errorf("failed to power off the source VM: %v", err)
+	// Trigger power off or shutdown guest OS of the source VM.
+	if vmo.IsPowerOffSupported() && vm.GetForcePowerOff() {
+		if !util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweringOff, v1.ConditionTrue) {
+			return triggerPowerOff(vm, vmo)
 		}
-		conds := []common.Condition{
-			{
-				Type:               migration.VirtualMachinePoweringOff,
-				Status:             v1.ConditionTrue,
-				LastUpdateTime:     metav1.Now().Format(time.RFC3339),
-				LastTransitionTime: metav1.Now().Format(time.RFC3339),
-			},
+	} else {
+		if !util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineShutdownGuest, v1.ConditionTrue) {
+			return triggerShutdownGuest(vm, vmo)
 		}
-		vm.Status.ImportConditions = util.MergeConditions(vm.Status.ImportConditions, conds)
-		return nil
 	}
 
-	if !util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweredOff, v1.ConditionTrue) &&
-		util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweringOff, v1.ConditionTrue) {
-		// check if VM is powered off
+	// Check if the source VM is powered off.
+	if !util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweredOff, v1.ConditionTrue) && (util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweringOff, v1.ConditionTrue) ||
+		util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineShutdownGuest, v1.ConditionTrue)) {
 		ok, err := vmo.IsPoweredOff(vm)
 		if err != nil {
-			return fmt.Errorf("error during check for vm power: %v", err)
+			return fmt.Errorf("failed to check if source VM is powered off: %w", err)
 		}
 		if ok {
 			conds := []common.Condition{
@@ -359,21 +401,62 @@ func (h *virtualMachineHandler) triggerExport(vm *migration.VirtualMachineImport
 			return nil
 		}
 
-		// default behaviour
-		return fmt.Errorf("waiting for vm %s to be powered off", fmt.Sprintf("%s/%s", vm.Namespace, vm.Name))
+		// Monitor a graceful shutdown by the guest OS and force a power off
+		// if the shutdown is not finished within the configured time period
+		// (see "vm.Spec.GracefulShutdownTimeoutSeconds").
+		// Note, the following code path only applies to VMware imports.
+		// OpenStack is doing a forced power off automatically if a graceful
+		// shutdown of the VM guest OS was not successful within the (in
+		// OpenStack) configured time period.
+		shutdownGuestCondition := util.GetCondition(vm.Status.ImportConditions, migration.VirtualMachineShutdownGuest, v1.ConditionTrue)
+		if shutdownGuestCondition != nil && vmo.IsPowerOffSupported() && !vm.GetForcePowerOff() {
+			// Continue only if a forced power off has not yet been triggered.
+			if !util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweringOff, v1.ConditionTrue) {
+				lastUpdateTime, err := time.Parse(time.RFC3339, shutdownGuestCondition.LastUpdateTime)
+				if err != nil {
+					return fmt.Errorf("failed to parse the last update time of the %s condition of %s: %w",
+						shutdownGuestCondition.Type, vm.NamespacedName(), err)
+				}
+
+				gracefulShutdownTimeout := time.Duration(vm.GetGracefulShutdownTimeoutSeconds()) * time.Second
+
+				if time.Since(lastUpdateTime) > gracefulShutdownTimeout {
+					logrus.WithFields(logrus.Fields{
+						"name":                                vm.Name,
+						"namespace":                           vm.Namespace,
+						"spec.virtualMachineName":             vm.Spec.VirtualMachineName,
+						"spec.sourceCluster.kind":             vm.Spec.SourceCluster.Kind,
+						"spec.sourceCluster.name":             vm.Spec.SourceCluster.Name,
+						"spec.gracefulShutdownTimeoutSeconds": vm.GetGracefulShutdownTimeoutSeconds(),
+					}).Info("Forcing power off of the source VM because the guest OS did not gracefully shutdown within the configured time period")
+					return triggerPowerOff(vm, vmo)
+				}
+			}
+		}
+
+		// Trigger another reconciliation in N seconds.
+		logrus.WithFields(logrus.Fields{
+			"name":                    vm.Name,
+			"namespace":               vm.Namespace,
+			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+			"spec.sourceCluster.kind": vm.Spec.SourceCluster.Kind,
+			"spec.sourceCluster.name": vm.Spec.SourceCluster.Name,
+		}).Info("Waiting for VM to be powered off ...")
+		h.importVM.EnqueueAfter(vm.Namespace, vm.Name, 5*time.Second)
+
+		return nil
 	}
 
 	if util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweredOff, v1.ConditionTrue) &&
-		util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweringOff, v1.ConditionTrue) &&
+		(util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachinePoweringOff, v1.ConditionTrue) || util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineShutdownGuest, v1.ConditionTrue)) &&
 		!util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineExported, v1.ConditionTrue) &&
 		!util.ConditionExists(vm.Status.ImportConditions, migration.VirtualMachineExportFailed, v1.ConditionTrue) {
 		logrus.WithFields(logrus.Fields{
-			"name":                              vm.Name,
-			"namespace":                         vm.Namespace,
-			"spec.virtualMachineName":           vm.Spec.VirtualMachineName,
-			"spec.sourceCluster.name":           vm.Spec.SourceCluster.Name,
-			"spec.sourceCluster.kind":           vm.Spec.SourceCluster.Kind,
-			"status.importedVirtualMachineName": vm.Status.ImportedVirtualMachineName,
+			"name":                    vm.Name,
+			"namespace":               vm.Namespace,
+			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+			"spec.sourceCluster.name": vm.Spec.SourceCluster.Name,
+			"spec.sourceCluster.kind": vm.Spec.SourceCluster.Kind,
 		}).Info("Exporting source VM")
 		err := vmo.ExportVirtualMachine(vm)
 		if err != nil {
@@ -389,12 +472,11 @@ func (h *virtualMachineHandler) triggerExport(vm *migration.VirtualMachineImport
 			}
 			vm.Status.ImportConditions = util.MergeConditions(vm.Status.ImportConditions, conds)
 			logrus.WithFields(logrus.Fields{
-				"name":                              vm.Name,
-				"namespace":                         vm.Namespace,
-				"spec.virtualMachineName":           vm.Spec.VirtualMachineName,
-				"spec.sourceCluster.name":           vm.Spec.SourceCluster.Name,
-				"spec.sourceCluster.kind":           vm.Spec.SourceCluster.Kind,
-				"status.importedVirtualMachineName": vm.Status.ImportedVirtualMachineName,
+				"name":                    vm.Name,
+				"namespace":               vm.Namespace,
+				"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+				"spec.sourceCluster.name": vm.Spec.SourceCluster.Name,
+				"spec.sourceCluster.kind": vm.Spec.SourceCluster.Kind,
 			}).Errorf("Failed to export source VM: %v", err)
 			return nil
 		}
@@ -440,7 +522,7 @@ func (h *virtualMachineHandler) generateVMO(vm *migration.VirtualMachineImport) 
 		return openstack.NewClient(h.ctx, endpoint, region, secret, options)
 	}
 
-	return nil, fmt.Errorf("unsupport source kind")
+	return nil, fmt.Errorf("source kind '%s' not supported", source.GetKind())
 }
 
 func (h *virtualMachineHandler) generateSource(vm *migration.VirtualMachineImport) (migration.SourceInterface, error) {

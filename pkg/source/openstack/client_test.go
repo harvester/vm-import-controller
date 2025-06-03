@@ -85,7 +85,7 @@ func Test_IsPoweredOff(t *testing.T) {
 	assert.NoError(err, "expected no error during check of power status")
 }
 
-func Test_PowerOffVirtualMachine(t *testing.T) {
+func Test_ShutdownGuest(t *testing.T) {
 	assert := require.New(t)
 	vmName, ok := os.LookupEnv("OS_VM_NAME")
 	assert.True(ok, "expected env variable VM_NAME to be set")
@@ -94,8 +94,28 @@ func Test_PowerOffVirtualMachine(t *testing.T) {
 			VirtualMachineName: vmName,
 		},
 	}
-	err := c.PowerOffVirtualMachine(vm)
+	err := c.PowerOff(vm)
 	assert.NoError(err, "expected no error during check of power status")
+}
+
+func Test_PowerOff(t *testing.T) {
+	assert := require.New(t)
+	vmName, ok := os.LookupEnv("OS_VM_NAME")
+	assert.True(ok, "expected env variable VM_NAME to be set")
+	vm := &migration.VirtualMachineImport{
+		Spec: migration.VirtualMachineImportSpec{
+			VirtualMachineName: vmName,
+		},
+	}
+	err := c.ShutdownGuest(vm)
+	assert.Error(err, "expected to get error")
+	assert.Equal("powering off is not supported by OpenStack", err.Error())
+}
+
+func Test_IsPowerOffSupported(t *testing.T) {
+	assert := require.New(t)
+	supported := c.IsPowerOffSupported()
+	assert.False(supported, "expected powering off is not supported")
 }
 
 func Test_ExportVirtualMachine(t *testing.T) {
