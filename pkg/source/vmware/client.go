@@ -14,6 +14,7 @@ import (
 	"github.com/vmware/govmomi/nfc"
 	"github.com/vmware/govmomi/object"
 	"github.com/vmware/govmomi/session"
+	"github.com/vmware/govmomi/view"
 	"github.com/vmware/govmomi/vim25"
 	"github.com/vmware/govmomi/vim25/mo"
 	"github.com/vmware/govmomi/vim25/soap"
@@ -34,8 +35,9 @@ import (
 type Client struct {
 	ctx context.Context
 	*govmomi.Client
-	tmpCerts string
-	dc       string
+	tmpCerts       string
+	dc             string
+	networkMapping map[string]string
 }
 
 func NewClient(ctx context.Context, endpoint string, dc string, secret *corev1.Secret) (*Client, error) {
@@ -94,6 +96,11 @@ func NewClient(ctx context.Context, endpoint string, dc string, secret *corev1.S
 	vmwareClient.ctx = ctx
 	vmwareClient.Client = c
 	vmwareClient.dc = dc
+	networkMap, err := GenerateNetworkMapByRef(ctx, c.Client)
+	if err != nil {
+		return nil, fmt.Errorf("error generating network map during client initialisation: %w", err)
+	}
+	vmwareClient.networkMapping = networkMap
 	return vmwareClient, nil
 
 }
@@ -128,10 +135,17 @@ func (c *Client) Verify() error {
 
 func (c *Client) PreFlightChecks(vm *migration.VirtualMachineImport) (err error) {
 	// Check the source network mappings.
-	f := find.NewFinder(c.Client.Client, true)
-	dc := c.dc
-	if !strings.HasPrefix(c.dc, "/") {
-		dc = fmt.Sprintf("/%s", c.dc)
+	if vm.Spec.SkipPreflightChecks {
+		logrus.WithFields(logrus.Fields{
+			"name":      vm.Name,
+			"namespace": vm.Namespace,
+		}).Info("skipping preflight checks")
+		return nil
+	}
+
+	networkMap, err := GenerateNetworkMapByName(c.ctx, c.Client.Client)
+	if err != nil {
+		return fmt.Errorf("error generating network map: %v", err)
 	}
 	for _, nm := range vm.Spec.Mapping {
 		logrus.WithFields(logrus.Fields{
@@ -140,11 +154,9 @@ func (c *Client) PreFlightChecks(vm *migration.VirtualMachineImport) (err error)
 			"sourceNetwork": nm.SourceNetwork,
 		}).Info("Checking the source network as part of the preflight checks")
 
-		// The path looks like `/<datacenter>/network/<network-name>`.
-		path := filepath.Join(dc, "/network", nm.SourceNetwork)
-		_, err := f.Network(c.ctx, path)
-		if err != nil {
-			return fmt.Errorf("error getting source network '%s': %v", nm.SourceNetwork, err)
+		elements := strings.Split(nm.SourceNetwork, "/")
+		if _, ok := networkMap[elements[len(elements)-1]]; ok {
+			return nil
 		}
 	}
 
@@ -344,7 +356,8 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		"spec":      o,
 	}, []string{"spec"})).Info("Origin spec of the VM to be imported")
 
-	networkInfos := generateNetworkInfos(o.Config.Hardware.Device)
+	// Need CPU, Socket, Memory, VirtualNIC information to perform the mapping
+	networkInfos := generateNetworkInfos(c.networkMapping, o.Config.Hardware.Device)
 
 	vmSpec := kubevirt.VirtualMachineSpec{
 		RunStrategy: &[]kubevirt.VirtualMachineRunStrategy{kubevirt.RunStrategyRerunOnFailure}[0],
@@ -412,50 +425,74 @@ func (c *Client) findVM(path, name string) (*object.VirtualMachine, error) {
 	return f.VirtualMachine(c.ctx, vmPath)
 }
 
-func generateNetworkInfos(devices []types.BaseVirtualDevice) []source.NetworkInfo {
+func generateNetworkInfos(networkMap map[string]string, devices []types.BaseVirtualDevice) []source.NetworkInfo {
 	result := make([]source.NetworkInfo, 0, len(devices))
 
 	for _, d := range devices {
 		switch d := d.(type) {
 		case *types.VirtualVmxnet:
 			obj := d
+			summary := identifyNetworkName(networkMap, *obj.GetVirtualDevice())
+			if summary == "" {
+				summary = obj.DeviceInfo.GetDescription().Summary
+			}
 			result = append(result, source.NetworkInfo{
-				NetworkName: obj.DeviceInfo.GetDescription().Summary,
+				NetworkName: summary,
 				MAC:         obj.MacAddress,
 				Model:       migration.NetworkInterfaceModelVirtio,
 			})
 		case *types.VirtualE1000e:
 			obj := d
+			summary := identifyNetworkName(networkMap, *obj.GetVirtualDevice())
+			if summary == "" {
+				summary = obj.DeviceInfo.GetDescription().Summary
+			}
 			result = append(result, source.NetworkInfo{
-				NetworkName: obj.DeviceInfo.GetDescription().Summary,
+				NetworkName: summary,
 				MAC:         obj.MacAddress,
 				Model:       migration.NetworkInterfaceModelE1000e,
 			})
 		case *types.VirtualE1000:
 			obj := d
+			summary := identifyNetworkName(networkMap, *obj.GetVirtualDevice())
+			if summary == "" {
+				summary = obj.DeviceInfo.GetDescription().Summary
+			}
 			result = append(result, source.NetworkInfo{
-				NetworkName: obj.DeviceInfo.GetDescription().Summary,
+				NetworkName: summary,
 				MAC:         obj.MacAddress,
 				Model:       migration.NetworkInterfaceModelE1000,
 			})
 		case *types.VirtualVmxnet3:
 			obj := d
+			summary := identifyNetworkName(networkMap, *obj.GetVirtualDevice())
+			if summary == "" {
+				summary = obj.DeviceInfo.GetDescription().Summary
+			}
 			result = append(result, source.NetworkInfo{
-				NetworkName: obj.DeviceInfo.GetDescription().Summary,
+				NetworkName: summary,
 				MAC:         obj.MacAddress,
 				Model:       migration.NetworkInterfaceModelVirtio,
 			})
 		case *types.VirtualVmxnet2:
 			obj := d
+			summary := identifyNetworkName(networkMap, *obj.GetVirtualDevice())
+			if summary == "" {
+				summary = obj.DeviceInfo.GetDescription().Summary
+			}
 			result = append(result, source.NetworkInfo{
-				NetworkName: obj.DeviceInfo.GetDescription().Summary,
+				NetworkName: summary,
 				MAC:         obj.MacAddress,
 				Model:       migration.NetworkInterfaceModelVirtio,
 			})
 		case *types.VirtualPCNet32:
 			obj := d
+			summary := identifyNetworkName(networkMap, *obj.GetVirtualDevice())
+			if summary == "" {
+				summary = obj.DeviceInfo.GetDescription().Summary
+			}
 			result = append(result, source.NetworkInfo{
-				NetworkName: obj.DeviceInfo.GetDescription().Summary,
+				NetworkName: summary,
 				MAC:         obj.MacAddress,
 				Model:       migration.NetworkInterfaceModelPcnet,
 			})
@@ -517,6 +554,94 @@ func (c *Client) SanitizeVirtualMachineImport(vm *migration.VirtualMachineImport
 	// Note, VMware allows upper case characters in virtual machine names,
 	// so we need to convert them to lower case to be RFC 1123 compliant.
 	vm.Status.ImportedVirtualMachineName = strings.ToLower(vm.Spec.VirtualMachineName)
+
+	return nil
+}
+
+// GenerateNetworkMayByRef lists all networks defined in the DC and converts them to
+// network id: network name
+// this subsequently used to map a network id to network name if needed based on the type
+// of backing device for a nic
+func GenerateNetworkMapByRef(ctx context.Context, c *vim25.Client) (map[string]string, error) {
+	networks, err := generateNetworkList(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	returnMap := make(map[string]string, len(networks))
+	for _, v := range networks {
+		returnMap[v.Reference().Value] = v.Name
+	}
+	logrus.Debugf("generated networkMapByRef: %v", returnMap)
+	return returnMap, nil
+}
+
+func GenerateNetworkMapByName(ctx context.Context, c *vim25.Client) (map[string]string, error) {
+	networks, err := generateNetworkList(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	returnMap := make(map[string]string, len(networks))
+	for _, v := range networks {
+		returnMap[v.Name] = v.Reference().Value
+	}
+	logrus.Debugf("generated networkMapByName: %v", returnMap)
+	return returnMap, nil
+}
+
+func generateNetworkList(ctx context.Context, c *vim25.Client) ([]mo.Network, error) {
+	var networks []mo.Network
+	manager := view.NewManager(c)
+	networkView, err := manager.CreateContainerView(ctx, c.ServiceContent.RootFolder, []string{"Network"}, true)
+	if err != nil {
+		return networks, fmt.Errorf("error generating network container view: %v", err)
+	}
+	defer networkView.Destroy(ctx)
+	if err := networkView.Retrieve(ctx, []string{"Network"}, nil, &networks); err != nil {
+		return networks, fmt.Errorf("error retreiving networks: %v", err)
+	}
+	return networks, nil
+}
+
+// identifyNetworkName uses the backing device for a nic to identify network name correctly
+// in case of a nic using a Distributed VSwitch the summary returned from device is of the form
+// DVSwitch : HEX NUMBER which breaks network lookup. As a result we need to identify the network name
+// from the PortGroupKey
+func identifyNetworkName(networkMap map[string]string, device types.VirtualDevice) string {
+	var summary string
+	backing := device.Backing
+	switch b := backing.(type) {
+	case *types.VirtualEthernetCardDistributedVirtualPortBackingInfo:
+		obj := b
+		logrus.Debugf("looking up portgroupkey: %v", obj.Port.PortgroupKey)
+		summary = networkMap[obj.Port.PortgroupKey]
+	case *types.VirtualEthernetCardNetworkBackingInfo:
+		obj := b
+		logrus.Debugf("using devicename: %v", obj.DeviceName)
+		summary = obj.DeviceName
+	default:
+		summary = ""
+	}
+	return summary
+}
+
+func (c *Client) ListNetworks() error {
+	mgr := view.NewManager(c.Client.Client)
+
+	v, err := mgr.CreateContainerView(c.ctx, c.ServiceContent.RootFolder, []string{"Network"}, true)
+	if err != nil {
+		return fmt.Errorf("error creating view %v", err)
+	}
+
+	defer v.Destroy(c.ctx)
+	var networks []mo.Network
+	err = v.Retrieve(c.ctx, []string{"Network"}, nil, &networks)
+	if err != nil {
+		return fmt.Errorf("error fetching networks: %v", err)
+	}
+
+	for _, net := range networks {
+		fmt.Printf("%s: %s\n", net.Name, net.Reference())
+	}
 
 	return nil
 }

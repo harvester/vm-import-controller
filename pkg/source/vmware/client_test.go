@@ -303,7 +303,7 @@ func Test_GenerateVirtualMachine(t *testing.T) {
 			VirtualMachineName: "DC0_H0_VM0",
 			Mapping: []migration.NetworkMapping{
 				{
-					SourceNetwork:      "DVSwitch: fea97929-4b2d-5972-b146-930c6d0b4014",
+					SourceNetwork:      "DC0_DVPG0",
 					DestinationNetwork: "default/vlan",
 				},
 			},
@@ -316,6 +316,7 @@ func Test_GenerateVirtualMachine(t *testing.T) {
 	assert.Len(newVM.Spec.Template.Spec.Domain.Devices.Interfaces, 1, "should have found a network map")
 	assert.Equal(newVM.Spec.Template.Spec.Domain.Memory.Guest.String(), "32M", "expected VM to have 32M memory")
 	assert.NotEmpty(newVM.Spec.Template.Spec.Domain.Resources.Limits, "expect to find resource requests to be present")
+	t.Log(newVM.Spec.Template.Spec.Domain.Devices.Interfaces)
 	assert.Equal(newVM.Spec.Template.Spec.Domain.Devices.Interfaces[0].Model, migration.NetworkInterfaceModelE1000, "expected to have a NIC with e1000 model")
 }
 
@@ -343,7 +344,7 @@ func Test_GenerateVirtualMachine_secureboot(t *testing.T) {
 			VirtualMachineName: "test01",
 			Mapping: []migration.NetworkMapping{
 				{
-					SourceNetwork:      "DVSwitch: fea97929-4b2d-5972-b146-930c6d0b4014",
+					SourceNetwork:      "DC0_DVPG0",
 					DestinationNetwork: "default/vlan",
 				},
 			},
@@ -425,17 +426,18 @@ func Test_identifyNetworkCards(t *testing.T) {
 	err = vmObj.Properties(c.ctx, vmObj.Reference(), []string{}, &o)
 	assert.NoError(err, "expected no error looking up vmObj properties")
 
-	networkInfo := generateNetworkInfos(o.Config.Hardware.Device)
+	networkInfo := generateNetworkInfos(c.networkMapping, o.Config.Hardware.Device)
 	assert.Len(networkInfo, 1, "expected to find only 1 item in the networkInfo")
+	t.Log(networkInfo)
 	networkMapping := []migration.NetworkMapping{
 		{
 			SourceNetwork:      "dummyNetwork",
 			DestinationNetwork: "harvester1",
 		},
 		{
-			SourceNetwork:         "DVSwitch: fea97929-4b2d-5972-b146-930c6d0b4014",
-			DestinationNetwork:    "pod-network",
 			NetworkInterfaceModel: ptr.To(migration.NetworkInterfaceModelRtl8139),
+			SourceNetwork:         "DC0_DVPG0",
+			DestinationNetwork:    "pod-network",
 		},
 	}
 
