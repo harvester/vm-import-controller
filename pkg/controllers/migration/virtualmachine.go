@@ -630,7 +630,7 @@ func (h *virtualMachineHandler) createVirtualMachine(vm *migration.VirtualMachin
 	vmVols := make([]kubevirt.Volume, 0, len(vm.Status.DiskImportStatus))
 	disks := make([]kubevirt.Disk, 0, len(vm.Status.DiskImportStatus))
 	for i, v := range vm.Status.DiskImportStatus {
-		pvcName := strings.ToLower(strings.Split(v.Name, ".img")[0])
+		pvcName := v.VirtualMachineImage
 		vmVols = append(vmVols, kubevirt.Volume{
 			Name: fmt.Sprintf("disk-%d", i),
 			VolumeSource: kubevirt.VolumeSource{
@@ -738,7 +738,7 @@ func (h *virtualMachineHandler) findAndCreatePVC(vm *migration.VirtualMachineImp
 
 		// check if PVC has already been created
 		createPVC := false
-		pvcName := strings.ToLower(strings.Split(v.Name, ".img")[0])
+		pvcName := v.VirtualMachineImage
 		_, err = h.pvc.Get(vm.Namespace, pvcName, metav1.GetOptions{})
 		if err != nil {
 			if apierrors.IsNotFound(err) {
