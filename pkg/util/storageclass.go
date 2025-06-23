@@ -27,11 +27,11 @@ func GetBackendFromStorageClassName(scName string, scCache ctlstoragev1.StorageC
 	if err != nil {
 		return "", err
 	}
-	return GetBackendFromStorageClass(sc)
+	return getBackendFromStorageClass(sc)
 }
 
-// GetBackendFromStorageClass returns the VMIBackend type based on the storage class.
-func GetBackendFromStorageClass(sc *v1.StorageClass) (v1beta1.VMIBackend, error) {
+// getBackendFromStorageClass returns the VMIBackend type based on the storage class.
+func getBackendFromStorageClass(sc *v1.StorageClass) (v1beta1.VMIBackend, error) {
 	vmiBackend := harvesterv1beta1.VMIBackendCDI
 	if sc.Provisioner == harvesterutil.CSIProvisionerLonghorn {
 		if dataEngine, ok := sc.Parameters["dataEngine"]; ok {

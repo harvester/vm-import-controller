@@ -40,9 +40,9 @@ import (
 
 const (
 	annotationVirtualMachineImport = "migration.harvesterhci.io/virtualmachineimport"
+	labelImported                  = "migration.harvesterhci.io/imported"
 	labelImageDisplayName          = "harvesterhci.io/imageDisplayName"
 	expectedAPIVersion             = "migration.harvesterhci.io/v1beta1"
-	hideImportedImage              = "migration.harvesterhci.io/hideImportedImage"
 )
 
 type VirtualMachineOperations interface {
@@ -739,7 +739,6 @@ func (h *virtualMachineHandler) findAndCreatePVC(vm *migration.VirtualMachineImp
 
 		// only needed for LonghornEngine v1, for cdi based images we will use the datavolume directly
 		if vmiObj.Spec.Backend == harvesterv1beta1.VMIBackendBackingImage {
-
 			// check if PVC has already been created
 			createPVC := false
 			pvcName := v.VirtualMachineImage
@@ -856,12 +855,12 @@ func (h *virtualMachineHandler) checkAndCreateVirtualMachineImage(vm *migration.
 				},
 			},
 			Labels: map[string]string{
+				labelImported: "true",
 				// Set the `harvesterhci.io/imageDisplayName` label to be
 				// able to search for the `VirtualMachineImage` object during
 				// the reconciliation phase. See code above at the beginning
 				// of this function.
 				labelImageDisplayName: labelDisplayName,
-				hideImportedImage:     "true",
 			},
 		},
 		Spec: harvesterv1beta1.VirtualMachineImageSpec{

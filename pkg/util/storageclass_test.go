@@ -46,7 +46,7 @@ func Test_GetBackendFromStorageClass(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		vmiBackend, err := GetBackendFromStorageClass(tc.sc)
+		vmiBackend, err := getBackendFromStorageClass(tc.sc)
 		assert.NoError(err, "expect no error")
 		assert.Equal(vmiBackend, tc.expected, tc.desc)
 	}
