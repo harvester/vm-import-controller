@@ -42,6 +42,7 @@ const (
 	annotationVirtualMachineImport = "migration.harvesterhci.io/virtualmachineimport"
 	labelImageDisplayName          = "harvesterhci.io/imageDisplayName"
 	expectedAPIVersion             = "migration.harvesterhci.io/v1beta1"
+	hideImportedImage              = "migration.harvesterhci.io/hideImportedImage"
 )
 
 type VirtualMachineOperations interface {
@@ -860,6 +861,7 @@ func (h *virtualMachineHandler) checkAndCreateVirtualMachineImage(vm *migration.
 				// the reconciliation phase. See code above at the beginning
 				// of this function.
 				labelImageDisplayName: labelDisplayName,
+				hideImportedImage:     "true",
 			},
 		},
 		Spec: harvesterv1beta1.VirtualMachineImageSpec{
