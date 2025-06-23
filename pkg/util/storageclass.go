@@ -38,8 +38,6 @@ func GetBackendFromStorageClass(sc *v1.StorageClass) (v1beta1.VMIBackend, error)
 			if dataEngine == string(longhorn.DataEngineTypeV1) {
 				vmiBackend = harvesterv1beta1.VMIBackendBackingImage
 			}
-		} else {
-			vmiBackend = harvesterv1beta1.VMIBackendBackingImage
 		}
 	}
 	return vmiBackend, nil

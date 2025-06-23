@@ -676,7 +676,7 @@ func (h *virtualMachineHandler) createVirtualMachine(vm *migration.VirtualMachin
 	if !found {
 		_, err := h.kubevirt.Create(runVM)
 		if err != nil {
-			return fmt.Errorf("error creating kubevirt VM in createVirtualMachine: %v", err)
+			return fmt.Errorf("error creating kubevirt VM %v in createVirtualMachine: %v", runVM, err)
 		}
 	}
 
@@ -736,53 +736,57 @@ func (h *virtualMachineHandler) findAndCreatePVC(vm *migration.VirtualMachineImp
 			return fmt.Errorf("error quering VirtualMachineImage '%s/%s' in findAndCreatePVC: %v", vm.Namespace, v.VirtualMachineImage, err)
 		}
 
-		// check if PVC has already been created
-		createPVC := false
-		pvcName := v.VirtualMachineImage
-		_, err = h.pvc.Get(vm.Namespace, pvcName, metav1.GetOptions{})
-		if err != nil {
-			if apierrors.IsNotFound(err) {
-				createPVC = true
-			} else {
-				return fmt.Errorf("error looking up existing PVC '%s/%s' in findAndCreatePVC: %v", vm.Namespace, pvcName, err)
+		// only needed for LonghornEngine v1, for cdi based images we will use the datavolume directly
+		if vmiObj.Spec.Backend == harvesterv1beta1.VMIBackendBackingImage {
+
+			// check if PVC has already been created
+			createPVC := false
+			pvcName := v.VirtualMachineImage
+			_, err = h.pvc.Get(vm.Namespace, pvcName, metav1.GetOptions{})
+			if err != nil {
+				if apierrors.IsNotFound(err) {
+					createPVC = true
+				} else {
+					return fmt.Errorf("error looking up existing PVC '%s/%s' in findAndCreatePVC: %v", vm.Namespace, pvcName, err)
+				}
+
 			}
 
-		}
-
-		if createPVC {
-			pvcObj := &corev1.PersistentVolumeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      pvcName,
-					Namespace: vm.Namespace,
-					Annotations: map[string]string{
-						harvesterutil.AnnotationImageID: fmt.Sprintf("%s/%s", vmiObj.Namespace, vmiObj.Name),
-					},
-				},
-				Spec: corev1.PersistentVolumeClaimSpec{
-					AccessModes: []corev1.PersistentVolumeAccessMode{
-						corev1.ReadWriteMany,
-					},
-					Resources: corev1.VolumeResourceRequirements{
-						Requests: corev1.ResourceList{
-							corev1.ResourceStorage: resource.MustParse(fmt.Sprintf("%d", vmiObj.Status.Size)),
+			if createPVC {
+				pvcObj := &corev1.PersistentVolumeClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      pvcName,
+						Namespace: vm.Namespace,
+						Annotations: map[string]string{
+							harvesterutil.AnnotationImageID: fmt.Sprintf("%s/%s", vmiObj.Namespace, vmiObj.Name),
 						},
 					},
-					StorageClassName: &vmiObj.Status.StorageClassName,
-					VolumeMode:       &[]corev1.PersistentVolumeMode{corev1.PersistentVolumeBlock}[0],
-				},
-			}
+					Spec: corev1.PersistentVolumeClaimSpec{
+						AccessModes: []corev1.PersistentVolumeAccessMode{
+							corev1.ReadWriteMany,
+						},
+						Resources: corev1.VolumeResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceStorage: resource.MustParse(fmt.Sprintf("%d", vmiObj.Status.Size)),
+							},
+						},
+						StorageClassName: &vmiObj.Status.StorageClassName,
+						VolumeMode:       &[]corev1.PersistentVolumeMode{corev1.PersistentVolumeBlock}[0],
+					},
+				}
 
-			logrus.WithFields(logrus.Fields{
-				"name":                  pvcObj.Name,
-				"namespace":             pvcObj.Namespace,
-				"annotations":           pvcObj.Annotations,
-				"spec.storageClassName": *pvcObj.Spec.StorageClassName,
-				"spec.volumeMode":       *pvcObj.Spec.VolumeMode,
-			}).Info("Creating a new PVC")
+				logrus.WithFields(logrus.Fields{
+					"name":                  pvcObj.Name,
+					"namespace":             pvcObj.Namespace,
+					"annotations":           pvcObj.Annotations,
+					"spec.storageClassName": *pvcObj.Spec.StorageClassName,
+					"spec.volumeMode":       *pvcObj.Spec.VolumeMode,
+				}).Info("Creating a new PVC")
 
-			_, err = h.pvc.Create(pvcObj)
-			if err != nil {
-				return err
+				_, err = h.pvc.Create(pvcObj)
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}
