@@ -102,6 +102,11 @@ func (h *virtualMachineHandler) reconcileVirtualMachineStatus(vm *migration.Virt
 func (h *virtualMachineHandler) reconcilePreFlightChecks(vm *migration.VirtualMachineImport) (*migration.VirtualMachineImport, error) {
 	err := h.preFlightChecks(vm)
 	if err != nil {
+		if err.Error() == errorClusterNotReady {
+			h.importVM.EnqueueAfter(vm.Namespace, vm.Name, 5*time.Second)
+			return vm, err
+		}
+
 		logrus.WithFields(logrus.Fields{
 			"name":                    vm.Name,
 			"namespace":               vm.Namespace,
