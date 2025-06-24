@@ -39,10 +39,9 @@ import (
 )
 
 const (
-	annotationVirtualMachineImport = "migration.harvesterhci.io/virtualmachineimport"
-	labelImported                  = "migration.harvesterhci.io/imported"
-	labelImageDisplayName          = "harvesterhci.io/imageDisplayName"
-	expectedAPIVersion             = "migration.harvesterhci.io/v1beta1"
+	labelImported         = "migration.harvesterhci.io/imported"
+	labelImageDisplayName = "harvesterhci.io/imageDisplayName"
+	expectedAPIVersion    = "migration.harvesterhci.io/v1beta1"
 )
 
 type VirtualMachineOperations interface {
@@ -658,18 +657,16 @@ func (h *virtualMachineHandler) createVirtualMachine(vm *migration.VirtualMachin
 	runVM.Spec.Template.Spec.Volumes = vmVols
 	runVM.Spec.Template.Spec.Domain.Devices.Disks = disks
 
-	// Apply annotations to the `VirtualMachine` object to make the newly
+	// Apply a label to the `VirtualMachine` object to make the newly
 	// created VM identifiable.
-	if runVM.GetAnnotations() == nil {
-		runVM.Annotations = make(map[string]string)
-	}
-	runVM.Annotations[annotationVirtualMachineImport] = fmt.Sprintf("%s-%s", vm.Name, vm.Namespace)
+	metav1.SetMetaDataLabel(&runVM.ObjectMeta, labelImported, "true")
 
 	// Make sure the new VM is created only if it does not exist.
 	found := false
 	existingVM, err := h.kubevirt.Get(runVM.Namespace, runVM.Name, metav1.GetOptions{})
 	if err == nil {
-		if existingVM.Annotations[annotationVirtualMachineImport] == fmt.Sprintf("%s-%s", vm.Name, vm.Namespace) {
+		value, ok := existingVM.Labels[labelImported]
+		if ok && value == "true" {
 			found = true
 		}
 	}
