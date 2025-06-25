@@ -1,13 +1,13 @@
 package util
 
 import (
-	"github.com/rancher/wrangler/pkg/condition"
-	v1 "k8s.io/api/core/v1"
+	"github.com/rancher/wrangler/v3/pkg/condition"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/harvester/vm-import-controller/pkg/apis/common"
 )
 
-func GetCondition(conditions []common.Condition, c condition.Cond, condType v1.ConditionStatus) *common.Condition {
+func GetCondition(conditions []common.Condition, c condition.Cond, condType corev1.ConditionStatus) *common.Condition {
 	for _, v := range conditions {
 		if v.Type == c && v.Status == condType {
 			return &v
@@ -17,7 +17,7 @@ func GetCondition(conditions []common.Condition, c condition.Cond, condType v1.C
 	return nil
 }
 
-func ConditionExists(conditions []common.Condition, c condition.Cond, condType v1.ConditionStatus) bool {
+func ConditionExists(conditions []common.Condition, c condition.Cond, condType corev1.ConditionStatus) bool {
 	for _, v := range conditions {
 		if v.Type == c && v.Status == condType {
 			return true
@@ -55,7 +55,7 @@ func MergeConditions(srcConditions []common.Condition, newCond []common.Conditio
 	return srcConditions
 }
 
-func RemoveCondition(conditions []common.Condition, c condition.Cond, condType v1.ConditionStatus) []common.Condition {
+func RemoveCondition(conditions []common.Condition, c condition.Cond, condType corev1.ConditionStatus) []common.Condition {
 	var retConditions []common.Condition
 	for _, v := range conditions {
 		if v.Type != c || v.Status != condType {
