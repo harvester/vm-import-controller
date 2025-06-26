@@ -135,14 +135,6 @@ func (c *Client) Verify() error {
 
 func (c *Client) PreFlightChecks(vm *migration.VirtualMachineImport) (err error) {
 	// Check the source network mappings.
-	if vm.Spec.SkipPreflightChecks {
-		logrus.WithFields(logrus.Fields{
-			"name":      vm.Name,
-			"namespace": vm.Namespace,
-		}).Info("skipping preflight checks")
-		return nil
-	}
-
 	networkMap, err := GenerateNetworkMapByName(c.ctx, c.Client.Client)
 	if err != nil {
 		return fmt.Errorf("error generating network map: %v", err)
