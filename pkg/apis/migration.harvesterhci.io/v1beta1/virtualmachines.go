@@ -34,7 +34,7 @@ type VirtualMachineImportSpec struct {
 
 	Folder string `json:"folder,omitempty"`
 
-	// If empty new VirtualMachineImport will be mapped to Management Network.
+	// If empty, new VirtualMachineImport will be mapped to Management Network.
 	Mapping []NetworkMapping `json:"networkMapping,omitempty"`
 	// The default network interface model. This is always used when:
 	// - Auto-detection fails (OpenStack source client does not have auto-detection, therefore this field is used for every network interface).
@@ -46,7 +46,7 @@ type VirtualMachineImportSpec struct {
 
 	// The bus type that is used for imported disks if auto-detection fails.
 	// Note, the OpenStack source client does not support auto-detection,
-	// therefore it always makes use of this field.
+	// therefore, it always makes use of this field.
 	// Defaults to "virtio".
 	DefaultDiskBusType *kubevirtv1.DiskBus `json:"defaultDiskBusType,omitempty"`
 
@@ -63,6 +63,11 @@ type VirtualMachineImportSpec struct {
 	// Defaults to 60 seconds.
 	// Please note that this field only applies to VMware imports.
 	GracefulShutdownTimeoutSeconds int32 `json:"gracefulShutdownTimeoutSeconds,omitempty"`
+
+	// +optional
+	// SkipPreflightChecks allows you to forcefully skip the preflight checks.
+	// Defaults to false.
+	SkipPreflightChecks *bool `json:"skipPreflightChecks,omitemtpy"`
 }
 
 // VirtualMachineImportStatus tracks the status of the VirtualMachineImport export from migration and import into the Harvester cluster
@@ -169,6 +174,10 @@ func (in *VirtualMachineImport) NamespacedName() string {
 		Namespace: in.Namespace,
 		Name:      in.Name,
 	}.String()
+}
+
+func (in *VirtualMachineImport) SkipPreflightChecks() bool {
+	return ptr.Deref(in.Spec.SkipPreflightChecks, false)
 }
 
 func (in *NetworkMapping) GetNetworkInterfaceModel() string {
