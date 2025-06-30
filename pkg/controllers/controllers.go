@@ -10,9 +10,9 @@ import (
 	"github.com/rancher/lasso/pkg/cache"
 	"github.com/rancher/lasso/pkg/client"
 	"github.com/rancher/lasso/pkg/controller"
-	"github.com/rancher/wrangler/pkg/generated/controllers/core"
-	"github.com/rancher/wrangler/pkg/generated/controllers/storage"
-	"github.com/rancher/wrangler/pkg/start"
+	"github.com/rancher/wrangler/v3/pkg/generated/controllers/core"
+	"github.com/rancher/wrangler/v3/pkg/generated/controllers/storage"
+	"github.com/rancher/wrangler/v3/pkg/start"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
 
