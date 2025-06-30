@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	corecontrollers "github.com/rancher/wrangler/pkg/generated/controllers/core/v1"
+	corecontrollers "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
 	"github.com/sirupsen/logrus"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/harvester/vm-import-controller/pkg/apis/common"
@@ -68,12 +68,12 @@ func (h *vmwareHandler) OnSourceChange(_ string, v *migration.VmwareSource) (*mi
 			conds := []common.Condition{
 				{
 					Type:               migration.ClusterErrorCondition,
-					Status:             v1.ConditionTrue,
+					Status:             corev1.ConditionTrue,
 					LastUpdateTime:     metav1.Now().Format(time.RFC3339),
 					LastTransitionTime: metav1.Now().Format(time.RFC3339),
 				}, {
 					Type:               migration.ClusterReadyCondition,
-					Status:             v1.ConditionFalse,
+					Status:             corev1.ConditionFalse,
 					LastUpdateTime:     metav1.Now().Format(time.RFC3339),
 					LastTransitionTime: metav1.Now().Format(time.RFC3339),
 				},
@@ -87,12 +87,12 @@ func (h *vmwareHandler) OnSourceChange(_ string, v *migration.VmwareSource) (*mi
 		conds := []common.Condition{
 			{
 				Type:               migration.ClusterReadyCondition,
-				Status:             v1.ConditionTrue,
+				Status:             corev1.ConditionTrue,
 				LastUpdateTime:     metav1.Now().Format(time.RFC3339),
 				LastTransitionTime: metav1.Now().Format(time.RFC3339),
 			}, {
 				Type:               migration.ClusterErrorCondition,
-				Status:             v1.ConditionFalse,
+				Status:             corev1.ConditionFalse,
 				LastUpdateTime:     metav1.Now().Format(time.RFC3339),
 				LastTransitionTime: metav1.Now().Format(time.RFC3339),
 			},

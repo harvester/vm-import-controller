@@ -182,6 +182,12 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 	u := lease.StartUpdater(c.ctx, info)
 	defer os.RemoveAll(tmpPath)
 
+	logrus.WithFields(util.FieldsToJSON(logrus.Fields{
+		"name":      vm.Name,
+		"namespace": vm.Namespace,
+		"spec":      info.Items,
+	}, []string{"spec"})).Info("Origin spec of the volumes to be imported")
+
 	for _, i := range info.Items {
 		// ignore iso and nvram disks
 		if strings.HasSuffix(i.Path, ".vmdk") {
