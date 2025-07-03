@@ -24,7 +24,7 @@ pull_request_rules:
 
 - name: Automatically open v1.6 backport PR
   conditions:
-    - base=master
+    - base=main
     - label="pr-backport-to/v1.6"
   actions:
     backport:
@@ -35,7 +35,7 @@ pull_request_rules:
 
 - name: Automatically open v1.5 backport PR
   conditions:
-    - base=master
+    - base=main
     - label="pr-backport-to/v1.5"
   actions:
     backport:
@@ -46,7 +46,7 @@ pull_request_rules:
 
 - name: Automatically open v1.4 backport PR
   conditions:
-    - base=master
+    - base=main
     - label="pr-backport-to/v1.4"
   actions:
     backport:
