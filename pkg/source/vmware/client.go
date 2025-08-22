@@ -184,7 +184,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 	}
 
 	u := lease.StartUpdater(c.ctx, info)
-	defer os.RemoveAll(tmpPath)
+	defer os.RemoveAll(tmpPath) //nolint:errcheck
 
 	logrus.WithFields(util.FieldsToJSON(logrus.Fields{
 		"name":      vm.Name,
@@ -593,7 +593,7 @@ func generateNetworkList(ctx context.Context, c *vim25.Client) ([]mo.Network, er
 	if err != nil {
 		return networks, fmt.Errorf("error generating network container view: %v", err)
 	}
-	defer networkView.Destroy(ctx)
+	defer networkView.Destroy(ctx) //nolint:errcheck
 	if err := networkView.Retrieve(ctx, []string{"Network"}, nil, &networks); err != nil {
 		return networks, fmt.Errorf("error retreiving networks: %v", err)
 	}
@@ -630,7 +630,7 @@ func (c *Client) ListNetworks() error {
 		return fmt.Errorf("error creating view %v", err)
 	}
 
-	defer v.Destroy(c.ctx)
+	defer v.Destroy(c.ctx) //nolint:errcheck
 	var networks []mo.Network
 	err = v.Retrieve(c.ctx, []string{"Network"}, nil, &networks)
 	if err != nil {

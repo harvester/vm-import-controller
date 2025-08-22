@@ -12,7 +12,7 @@ func Test_ConvertVMDKToRaw(t *testing.T) {
 	assert := require.New(t)
 	tmpDir, err := os.MkdirTemp("/tmp", "disk-test")
 	assert.NoError(err, "expected no error during creation of tmpDir")
-	defer os.RemoveAll(tmpDir)
+	defer os.RemoveAll(tmpDir) //nolint:errcheck
 	tmpVMDK := filepath.Join(tmpDir, "vmdktest.vmdk")
 	err = createVMDK(tmpVMDK, "512M")
 	assert.NoError(err, "expected no error during tmp vmdk creation")

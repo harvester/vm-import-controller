@@ -11,7 +11,9 @@ import (
 )
 
 func main() {
-	os.Unsetenv("GOPATH")
+	if err := os.Unsetenv("GOPATH"); err != nil {
+		panic(err)
+	}
 	controllergen.Run(args.Options{
 		OutputPackage: "github.com/harvester/vm-import-controller/pkg/generated",
 		Boilerplate:   "scripts/boilerplate.go.txt",
