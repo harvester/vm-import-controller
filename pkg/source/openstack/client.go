@@ -690,7 +690,7 @@ func (c *Client) checkOrGetUUID(input string) (string, error) {
 	}
 
 	if ok {
-		return "", fmt.Errorf(NotServerFound)
+		return "", fmt.Errorf("%s: %s", NotServerFound, input)
 	}
 
 	allServers, err := servers.ExtractServers(allPg)
@@ -709,7 +709,7 @@ func (c *Client) checkOrGetUUID(input string) (string, error) {
 	}
 
 	if len(filteredServers) > 1 {
-		return "", fmt.Errorf(NotUniqueName)
+		return "", fmt.Errorf("%s: %s", NotUniqueName, input)
 	}
 	return filteredServers[0].ID, nil
 }
@@ -832,7 +832,7 @@ func writeRawImageFile(name string, src io.ReadCloser) error {
 		return fmt.Errorf("error creating raw image file: %v", err)
 	}
 
-	defer dst.Close()
+	defer dst.Close() //nolint:errcheck
 
 	_, err = io.Copy(dst, src)
 	return err

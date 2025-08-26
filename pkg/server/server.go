@@ -23,7 +23,7 @@ func NewServer(ctx context.Context) error {
 }
 
 func newServer(ctx context.Context, path string) error {
-	defer os.RemoveAll(tmpDir)
+	defer os.RemoveAll(tmpDir) //nolint:errcheck
 	srv := http.Server{
 		Addr: fmt.Sprintf(":%d", defaultPort),
 		// fix G114: Use of net/http serve function that has no support for setting timeouts (gosec)

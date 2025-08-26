@@ -67,7 +67,7 @@ type VirtualMachineImportSpec struct {
 	// +optional
 	// SkipPreflightChecks allows you to forcefully skip the preflight checks.
 	// Defaults to false.
-	SkipPreflightChecks *bool `json:"skipPreflightChecks,omitemtpy"`
+	SkipPreflightChecks *bool `json:"skipPreflightChecks"`
 }
 
 // VirtualMachineImportStatus tracks the status of the VirtualMachineImport export from migration and import into the Harvester cluster

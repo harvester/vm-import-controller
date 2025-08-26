@@ -42,6 +42,9 @@ func runCommand(command string, args ...string) error {
 
 	errOut, _ := io.ReadAll(stderr)
 	out, err := io.ReadAll(stdout)
+	if err != nil {
+		return fmt.Errorf("error reading command output: %v", err)
+	}
 	err = cmd.Wait()
 	if err != nil {
 		return fmt.Errorf("error in command: %s, %s", command, errOut)

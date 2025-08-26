@@ -1,7 +1,6 @@
 package util
 
 import (
-	"github.com/harvester/harvester/pkg/apis/harvesterhci.io/v1beta1"
 	harvesterutil "github.com/harvester/harvester/pkg/util"
 	ctlstoragev1 "github.com/rancher/wrangler/v3/pkg/generated/controllers/storage/v1"
 	"github.com/sirupsen/logrus"
@@ -22,7 +21,7 @@ func GetStorageClassByName(scName string, scCache ctlstoragev1.StorageClassCache
 }
 
 // GetBackendFromStorageClassName returns the VMIBackend type based on the storage class name.
-func GetBackendFromStorageClassName(scName string, scCache ctlstoragev1.StorageClassCache) (v1beta1.VMIBackend, error) {
+func GetBackendFromStorageClassName(scName string, scCache ctlstoragev1.StorageClassCache) (harvesterv1beta1.VMIBackend, error) {
 	sc, err := GetStorageClassByName(scName, scCache)
 	if err != nil {
 		return "", err
@@ -31,7 +30,7 @@ func GetBackendFromStorageClassName(scName string, scCache ctlstoragev1.StorageC
 }
 
 // getBackendFromStorageClass returns the VMIBackend type based on the storage class.
-func getBackendFromStorageClass(sc *v1.StorageClass) (v1beta1.VMIBackend, error) {
+func getBackendFromStorageClass(sc *v1.StorageClass) (harvesterv1beta1.VMIBackend, error) {
 	vmiBackend := harvesterv1beta1.VMIBackendCDI
 	if sc.Provisioner == harvesterutil.CSIProvisionerLonghorn {
 		if dataEngine, ok := sc.Parameters["dataEngine"]; ok {
