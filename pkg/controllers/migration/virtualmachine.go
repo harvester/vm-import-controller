@@ -2,6 +2,7 @@ package migration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -42,6 +43,7 @@ const (
 	labelImported         = "migration.harvesterhci.io/imported"
 	labelImageDisplayName = "harvesterhci.io/imageDisplayName"
 	expectedAPIVersion    = "migration.harvesterhci.io/v1beta1"
+	errorClusterNotReady  = "source cluster not ready yet"
 )
 
 type VirtualMachineOperations interface {
@@ -237,7 +239,12 @@ func (h *virtualMachineHandler) preFlightChecks(vm *migration.VirtualMachineImpo
 	}
 
 	if ss.ClusterStatus() != migration.ClusterReady {
-		return fmt.Errorf("migration not yet ready. Current status is '%s'", ss.ClusterStatus())
+		logrus.WithFields(logrus.Fields{
+			"kind":   ss.GetKind(),
+			"name":   vm.Spec.SourceCluster.Name,
+			"status": ss.ClusterStatus(),
+		}).Warn("The source cluster is not ready yet")
+		return errors.New(errorClusterNotReady)
 	}
 
 	// verify specified storage class exists. Empty storage class means default storage class
