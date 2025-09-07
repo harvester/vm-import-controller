@@ -124,7 +124,7 @@ require (
 )
 
 replace (
-	github.com/containerd/containerd => github.com/containerd/containerd v1.6.18
+	github.com/containerd/containerd => github.com/containerd/containerd v1.7.28
 	github.com/docker/distribution => github.com/docker/distribution v2.8.0+incompatible
 	github.com/emicklei/go-restful => github.com/emicklei/go-restful v2.16.0+incompatible
 	github.com/openshift/api => github.com/openshift/api v0.0.0-20191219222812-2987a591a72c
