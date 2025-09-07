@@ -161,7 +161,7 @@ replace (
 	k8s.io/mount-utils => k8s.io/mount-utils v0.23.7
 	k8s.io/pod-security-admission => k8s.io/pod-security-admission v0.23.7
 	k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.23.7
-	kubevirt.io/api => github.com/kubevirt/api v0.55.1
+	kubevirt.io/api => github.com/kubevirt/api v0.59.2
 	kubevirt.io/client-go => github.com/kubevirt/client-go v0.55.1
 	kubevirt.io/containerized-data-importer-api => kubevirt.io/containerized-data-importer-api v1.47.0
 	kubevirt.io/kubevirt => kubevirt.io/kubevirt v0.55.1
