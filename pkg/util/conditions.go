@@ -28,8 +28,10 @@ func ConditionExists(conditions []common.Condition, c condition.Cond, condType c
 }
 
 func AddOrUpdateCondition(conditions []common.Condition, newCond common.Condition) []common.Condition {
-	var found bool
-	for _, v := range conditions {
+	found := false
+
+	for i := range conditions {
+		v := &conditions[i]
 		if v.Type == newCond.Type {
 			found = true
 			v.Status = newCond.Status
