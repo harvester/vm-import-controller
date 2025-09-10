@@ -10,8 +10,8 @@ require (
 	github.com/onsi/gomega v1.19.0
 	github.com/ory/dockertest/v3 v3.9.1
 	github.com/rancher/lasso v0.0.0-20221227210133-6ea88ca2fbcc
-	github.com/rancher/wrangler v1.1.0
-	github.com/sirupsen/logrus v1.9.0
+	github.com/rancher/wrangler v1.1.2
+	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.8.1
 	github.com/vmware/govmomi v0.29.0
 	golang.org/x/sync v0.3.0
@@ -125,13 +125,13 @@ require (
 
 replace (
 	github.com/containerd/containerd => github.com/containerd/containerd v1.7.28
-	github.com/docker/distribution => github.com/docker/distribution v2.8.0+incompatible
+	github.com/docker/distribution => github.com/docker/distribution v2.8.3+incompatible
 	github.com/emicklei/go-restful => github.com/emicklei/go-restful v2.16.0+incompatible
-	github.com/openshift/api => github.com/openshift/api v0.0.0-20191219222812-2987a591a72c
-	github.com/openshift/client-go => github.com/openshift/client-go v0.0.0-20200521150516-05eb9880269c
+	github.com/openshift/api => github.com/openshift/api e515d9c65abd
+	github.com/openshift/client-go => github.com/openshift/client-go 6193816ae379
 	github.com/operator-framework/operator-lifecycle-manager => github.com/operator-framework/operator-lifecycle-manager v0.35.0
-	github.com/rancher/rancher/pkg/apis => github.com/rancher/rancher/pkg/apis v0.0.0-20211208233239-77392a65423d
-	github.com/rancher/rancher/pkg/client => github.com/rancher/rancher/pkg/client v0.0.0-20211208233239-77392a65423d
+	github.com/rancher/rancher/pkg/apis => github.com/rancher/rancher/pkg/apis 58abf492671b
+	github.com/rancher/rancher/pkg/client => github.com/rancher/rancher/pkg/client 58abf492671b
 	golang.org/x/net => golang.org/x/net v0.17.0
 	golang.org/x/text => golang.org/x/text v0.3.8
 	k8s.io/api => k8s.io/api v0.23.7 // Dropped to v0.20.2 to handle kubevirt deps for installing CRDs
@@ -150,12 +150,12 @@ replace (
 	k8s.io/csi-translation-lib => k8s.io/csi-translation-lib v0.23.7
 	k8s.io/kube-aggregator => k8s.io/kube-aggregator v0.23.7
 	k8s.io/kube-controller-manager => k8s.io/kube-controller-manager v0.23.7
-	k8s.io/kube-openapi => k8s.io/kube-openapi v0.0.0-20220124234850-424119656bbf
+	k8s.io/kube-openapi => k8s.io/kube-openapi 589584f1c912
 	k8s.io/kube-proxy => k8s.io/kube-proxy v0.23.7
 	k8s.io/kube-scheduler => k8s.io/kube-scheduler v0.23.7
 	k8s.io/kubectl => k8s.io/kubectl v0.23.7
 	k8s.io/kubelet => k8s.io/kubelet v0.23.7
-	k8s.io/kubernetes => k8s.io/kubernetes v1.34.0
+	k8s.io/kubernetes => k8s.io/kubernetes v1.34.1
 	k8s.io/legacy-cloud-providers => k8s.io/legacy-cloud-providers v0.23.7
 	k8s.io/metrics => k8s.io/metrics v0.23.7
 	k8s.io/mount-utils => k8s.io/mount-utils v0.23.7
