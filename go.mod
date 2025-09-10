@@ -15,9 +15,9 @@ require (
 	github.com/stretchr/testify v1.8.1
 	github.com/vmware/govmomi v0.29.0
 	golang.org/x/sync v0.3.0
-	k8s.io/api v0.25.4
-	k8s.io/apiextensions-apiserver v0.25.4
-	k8s.io/apimachinery v0.25.4
+	k8s.io/api v0.34.1
+	k8s.io/apiextensions-apiserver v0.34.1
+	k8s.io/apimachinery v0.34.1
 	k8s.io/client-go v12.0.0+incompatible
 	kubevirt.io/api v0.54.0
 	kubevirt.io/kubevirt v0.54.0
@@ -135,32 +135,32 @@ replace (
 	golang.org/x/net => golang.org/x/net v0.17.0
 	golang.org/x/text => golang.org/x/text v0.3.8
 	k8s.io/api => k8s.io/api v0.23.7 // Dropped to v0.20.2 to handle kubevirt deps for installing CRDs
-	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.23.7
-	k8s.io/apimachinery => k8s.io/apimachinery v0.23.7
-	k8s.io/apiserver => k8s.io/apiserver v0.23.7
-	k8s.io/cli-runtime => k8s.io/cli-runtime v0.23.7
+	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.34.1
+	k8s.io/apimachinery => k8s.io/apimachinery v0.34.1
+	k8s.io/apiserver => k8s.io/apiserver v0.34.1
+	k8s.io/cli-runtime => k8s.io/cli-runtime v0.34.1
 	k8s.io/client-go => k8s.io/client-go v0.23.7 // Dropped to v0.20.2 to handle kubevirt deps for installing CRDs
-	k8s.io/cloud-provider => k8s.io/cloud-provider v0.23.7
-	k8s.io/cluster-bootstrap => k8s.io/cluster-bootstrap v0.23.7
-	k8s.io/code-generator => k8s.io/code-generator v0.23.7
-	k8s.io/component-base => k8s.io/component-base v0.23.7
-	k8s.io/component-helpers => k8s.io/component-helpers v0.23.7
-	k8s.io/controller-manager => k8s.io/controller-manager v0.23.7
-	k8s.io/cri-api => k8s.io/cri-api v0.23.7
-	k8s.io/csi-translation-lib => k8s.io/csi-translation-lib v0.23.7
-	k8s.io/kube-aggregator => k8s.io/kube-aggregator v0.23.7
-	k8s.io/kube-controller-manager => k8s.io/kube-controller-manager v0.23.7
+	k8s.io/cloud-provider => k8s.io/cloud-provider v0.34.1
+	k8s.io/cluster-bootstrap => k8s.io/cluster-bootstrap v0.34.1
+	k8s.io/code-generator => k8s.io/code-generator v0.34.1
+	k8s.io/component-base => k8s.io/component-base v0.34.1
+	k8s.io/component-helpers => k8s.io/component-helpers v0.34.1
+	k8s.io/controller-manager => k8s.io/controller-manager v0.34.1
+	k8s.io/cri-api => k8s.io/cri-api v0.34.1
+	k8s.io/csi-translation-lib => k8s.io/csi-translation-lib v0.34.1
+	k8s.io/kube-aggregator => k8s.io/kube-aggregator v0.34.1
+	k8s.io/kube-controller-manager => k8s.io/kube-controller-manager v0.34.1
 	k8s.io/kube-openapi => k8s.io/kube-openapi v0.0.0-20220124234850-424119656bbf
-	k8s.io/kube-proxy => k8s.io/kube-proxy v0.23.7
-	k8s.io/kube-scheduler => k8s.io/kube-scheduler v0.23.7
-	k8s.io/kubectl => k8s.io/kubectl v0.23.7
-	k8s.io/kubelet => k8s.io/kubelet v0.23.7
+	k8s.io/kube-proxy => k8s.io/kube-proxy v0.34.1
+	k8s.io/kube-scheduler => k8s.io/kube-scheduler v0.34.1
+	k8s.io/kubectl => k8s.io/kubectl v0.34.1
+	k8s.io/kubelet => k8s.io/kubelet v0.34.1
 	k8s.io/kubernetes => k8s.io/kubernetes v1.34.0
-	k8s.io/legacy-cloud-providers => k8s.io/legacy-cloud-providers v0.23.7
-	k8s.io/metrics => k8s.io/metrics v0.23.7
-	k8s.io/mount-utils => k8s.io/mount-utils v0.23.7
-	k8s.io/pod-security-admission => k8s.io/pod-security-admission v0.23.7
-	k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.23.7
+	k8s.io/legacy-cloud-providers => k8s.io/legacy-cloud-providers v0.30.14
+	k8s.io/metrics => k8s.io/metrics v0.34.1
+	k8s.io/mount-utils => k8s.io/mount-utils v0.34.1
+	k8s.io/pod-security-admission => k8s.io/pod-security-admission v0.34.1
+	k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.34.1
 	kubevirt.io/api => github.com/kubevirt/api v0.55.1
 	kubevirt.io/client-go => github.com/kubevirt/client-go v0.55.1
 	kubevirt.io/containerized-data-importer-api => kubevirt.io/containerized-data-importer-api v1.47.0
