@@ -147,8 +147,8 @@ func (c *Client) PreFlightChecks(vm *migration.VirtualMachineImport) (err error)
 		}).Info("Checking the source network as part of the preflight checks")
 
 		elements := strings.Split(nm.SourceNetwork, "/")
-		if _, ok := networkMap[elements[len(elements)-1]]; ok {
-			return nil
+		if _, ok := networkMap[elements[len(elements)-1]]; !ok {
+			return fmt.Errorf("source network '%s' not found", nm.SourceNetwork)
 		}
 	}
 
