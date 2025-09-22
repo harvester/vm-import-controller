@@ -311,15 +311,10 @@ func (h *virtualMachineHandler) preFlightChecks(vm *migration.VirtualMachineImpo
 			"name":                    vm.Name,
 			"namespace":               vm.Namespace,
 			"spec.sourcecluster.kind": vm.Spec.SourceCluster.Kind,
-		}).Info("skipping preflight checks")
+		}).Info("Skipping preflight checks")
 	} else {
 		err = vmo.PreFlightChecks(vm)
 		if err != nil {
-			logrus.WithFields(logrus.Fields{
-				"name":                    vm.Name,
-				"namespace":               vm.Namespace,
-				"spec.sourcecluster.kind": vm.Spec.SourceCluster.Kind,
-			}).Errorf("Failed to perform source cluster specific preflight checks: %v", err)
 			return err
 		}
 	}

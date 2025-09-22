@@ -110,8 +110,9 @@ func (h *virtualMachineHandler) reconcilePreFlightChecks(vm *migration.VirtualMa
 		logrus.WithFields(logrus.Fields{
 			"name":                    vm.Name,
 			"namespace":               vm.Namespace,
+			"spec.sourcecluster.kind": vm.Spec.SourceCluster.Kind,
 			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
-		}).Errorf("The preflight checks failed: %v", err)
+		}).Errorf("Failed to perform source cluster specific preflight checks: %v", err)
 		// Stop the reconciling for good as the checks failed.
 		vm.Status.Status = migration.VirtualMachineImportInvalid
 	} else {

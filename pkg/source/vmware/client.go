@@ -152,6 +152,37 @@ func (c *Client) PreFlightChecks(vm *migration.VirtualMachineImport) (err error)
 		}
 	}
 
+	// If shutdown guest OS is requested (and power off is not forced), make
+	// sure that VMware tools are installed, otherwise shutdown will fail, and
+	// the import process will be stuck in an infinite loop.
+	if !vm.GetForcePowerOff() {
+		vmObj, err := c.findVM(vm.Spec.Folder, vm.Spec.VirtualMachineName)
+		if err != nil {
+			return fmt.Errorf("failed to find VM: %w", err)
+		}
+
+		poweredOff, err := isPoweredOff(c.ctx, vmObj)
+		if err != nil {
+			return err
+		}
+
+		if !poweredOff {
+			logrus.WithFields(logrus.Fields{
+				"name":      vm.Name,
+				"namespace": vm.Namespace,
+			}).Info("Checking if VMware Tools is running as part of the preflight checks")
+
+			toolsRunning, err := vmObj.IsToolsRunning(c.ctx)
+			if err != nil {
+				return fmt.Errorf("failed to check if VMware Tools is running: %w", err)
+			}
+
+			if !toolsRunning {
+				return fmt.Errorf("cannot shutdown guest OS, VMware Tools is not running in the VM %s. Shut down the VM manually or use the 'spec.forcePowerOff' field", vm.Spec.VirtualMachineName)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -277,7 +308,7 @@ func (c *Client) ShutdownGuest(vm *migration.VirtualMachineImport) error {
 		return fmt.Errorf("error finding VM in ShutdownGuest: %w", err)
 	}
 
-	ok, err := c.IsPoweredOff(vm)
+	ok, err := isPoweredOff(c.ctx, vmObj)
 	if err != nil {
 		return err
 	}
@@ -295,7 +326,7 @@ func (c *Client) PowerOff(vm *migration.VirtualMachineImport) error {
 		return fmt.Errorf("error finding VM in PowerOff: %w", err)
 	}
 
-	ok, err := c.IsPoweredOff(vm)
+	ok, err := isPoweredOff(c.ctx, vmObj)
 	if err != nil {
 		return err
 	}
@@ -317,13 +348,7 @@ func (c *Client) IsPoweredOff(vm *migration.VirtualMachineImport) (bool, error) 
 	if err != nil {
 		return false, fmt.Errorf("error find VM in IsPoweredOff: %v", err)
 	}
-
-	state, err := vmObj.PowerState(c.ctx)
-	if err != nil {
-		return false, fmt.Errorf("error looking up powerstate: %v", err)
-	}
-
-	return state == types.VirtualMachinePowerStatePoweredOff, nil
+	return isPoweredOff(c.ctx, vmObj)
 }
 
 func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*kubevirt.VirtualMachine, error) {
@@ -642,4 +667,13 @@ func (c *Client) ListNetworks() error {
 	}
 
 	return nil
+}
+
+// isPoweredOff checks if the given VM is powered off.
+func isPoweredOff(ctx context.Context, vm *object.VirtualMachine) (bool, error) {
+	state, err := vm.PowerState(ctx)
+	if err != nil {
+		return false, fmt.Errorf("failed to get power state: %w", err)
+	}
+	return state == types.VirtualMachinePowerStatePoweredOff, nil
 }
