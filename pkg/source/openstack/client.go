@@ -25,7 +25,6 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/utils"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	kubevirt "kubevirt.io/api/core/v1"
@@ -529,12 +528,12 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 
 	flavorObj, err := flavors.Get(c.ctx, c.computeClient, vmObj.Flavor["id"].(string)).Extract()
 	if err != nil {
-		return nil, fmt.Errorf("error looking up flavor: %v", err)
+		return nil, fmt.Errorf("error looking up flavor: %w", err)
 	}
 
-	uefi, tpm, secureBoot, err := c.ImageFirmwareSettings(&vmObj.Server)
+	fw, err := c.getFirmwareSettings(&vmObj.Server)
 	if err != nil {
-		return nil, fmt.Errorf("error getting firware settings: %v", err)
+		return nil, fmt.Errorf("error getting firware settings: %w", err)
 	}
 
 	networkInfos, err := generateNetworkInfos(vmObj.Addresses, vm.GetDefaultNetworkInterfaceModel())
@@ -556,57 +555,34 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		newVM.Annotations[annotationDescription] = vmObj.Description
 	}
 
-	vmSpec := kubevirt.VirtualMachineSpec{
-		RunStrategy: &[]kubevirt.VirtualMachineRunStrategy{kubevirt.RunStrategyRerunOnFailure}[0],
-		Template: &kubevirt.VirtualMachineInstanceTemplateSpec{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					"harvesterhci.io/vmName": vm.Status.ImportedVirtualMachineName,
-				},
-			},
-			Spec: kubevirt.VirtualMachineInstanceSpec{
-				Domain: kubevirt.DomainSpec{
-					CPU: &kubevirt.CPU{
-						Cores:   uint32(flavorObj.VCPUs), // nolint:gosec
-						Sockets: uint32(1),
-						Threads: 1,
-					},
-					Memory: &kubevirt.Memory{
-						Guest: &[]resource.Quantity{resource.MustParse(fmt.Sprintf("%dM", flavorObj.RAM))}[0],
-					},
-					Resources: kubevirt.ResourceRequirements{
-						Limits: corev1.ResourceList{
-							corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dM", flavorObj.RAM)),
-							corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", flavorObj.VCPUs)),
-						},
-					},
-					Features: &kubevirt.Features{
-						ACPI: kubevirt.FeatureState{
-							Enabled: ptr.To(true),
-						},
-					},
-				},
-			},
+	vmSpec := source.NewVirtualMachineSpec(source.VirtualMachineSpecConfig{
+		Name: vm.Status.ImportedVirtualMachineName,
+		Hardware: source.Hardware{
+			NumCPU:            uint32(flavorObj.VCPUs), // nolint:gosec
+			NumCoresPerSocket: 1,
+			MemoryMB:          int64(flavorObj.RAM), // nolint:gosec
 		},
-	}
+	})
 
 	mappedNetwork := source.MapNetworks(networkInfos, vm.Spec.Mapping)
 	networkConfig, interfaceConfig := source.GenerateNetworkInterfaceConfigs(mappedNetwork, vm.GetDefaultNetworkInterfaceModel())
 
 	// Setup BIOS/EFI, SecureBoot and TPM settings.
-	if uefi {
-		source.VMSpecSetupUEFISettings(&vmSpec, secureBoot, tpm)
-	}
+	source.ApplyFirmwareSettings(vmSpec, fw)
 
 	vmSpec.Template.Spec.Networks = networkConfig
 	vmSpec.Template.Spec.Domain.Devices.Interfaces = interfaceConfig
-	newVM.Spec = vmSpec
+	newVM.Spec = *vmSpec
 
 	// disk attachment needs query by core controller for storage classes, so will be added by the migration controller
 	return newVM, nil
 }
 
-// SetupOpenStackSecretFromEnv is a helper function to ease with testing
+func (c *Client) Cleanup(vm *migration.VirtualMachineImport) error {
+	return source.RemoveTempImageFiles(vm.Status.DiskImportStatus)
+}
+
+// SetupOpenstackSecretFromEnv is a helper function to ease with testing
 func SetupOpenstackSecretFromEnv(name string) (*corev1.Secret, error) {
 	s := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -727,20 +703,20 @@ func (c *Client) findVM(name string) (*ExtendedServer, error) {
 	return &s, err
 }
 
-func (c *Client) ImageFirmwareSettings(instance *servers.Server) (bool, bool, bool, error) {
+func (c *Client) getFirmwareSettings(instance *servers.Server) (*source.Firmware, error) {
 	var imageID string
-	var uefiType, tpmEnabled, secureBoot bool
+
 	for _, v := range instance.AttachedVolumes {
 		resp := volumes.Get(c.ctx, c.storageClient, v.ID)
 		var volInfo volumes.Volume
 		if err := resp.ExtractIntoStructPtr(&volInfo, "volume"); err != nil {
-			return uefiType, tpmEnabled, secureBoot, fmt.Errorf("error extracting volume info for volume %s: %v", v.ID, err)
+			return nil, fmt.Errorf("error extracting volume info for volume %s: %v", v.ID, err)
 		}
 
 		if volInfo.Bootable == "true" {
 			var volStatus ExtendedVolume
 			if err := resp.ExtractIntoStructPtr(&volStatus, "volume"); err != nil {
-				return uefiType, tpmEnabled, secureBoot, fmt.Errorf("error extracting volume status for volume %s: %v", v.ID, err)
+				return nil, fmt.Errorf("error extracting volume status for volume %s: %v", v.ID, err)
 			}
 			imageID = volStatus.VolumeImageMetadata["image_id"]
 		}
@@ -748,21 +724,25 @@ func (c *Client) ImageFirmwareSettings(instance *servers.Server) (bool, bool, bo
 
 	imageInfo, err := images.Get(c.ctx, c.imageClient, imageID).Extract()
 	if err != nil {
-		return uefiType, tpmEnabled, secureBoot, fmt.Errorf("error getting image details for image %s: %v", imageID, err)
+		return nil, fmt.Errorf("error getting image details for image %s: %v", imageID, err)
 	}
+
+	fw := source.NewFirmware(false, false, false)
+
 	firmwareType, ok := imageInfo.Properties["hw_firmware_type"]
 	if ok && firmwareType.(string) == "uefi" {
-		uefiType = true
+		fw.UEFI = true
 	}
 	logrus.Debugf("found image firmware settings %v", imageInfo.Properties)
 	if _, ok := imageInfo.Properties["hw_tpm_model"]; ok {
-		tpmEnabled = true
+		fw.TPM = true
 	}
 
 	if val, ok := imageInfo.Properties["os_secure_boot"]; ok && (val == "required" || val == "optional") {
-		secureBoot = true
+		fw.SecureBoot = true
 	}
-	return uefiType, tpmEnabled, secureBoot, nil
+
+	return fw, nil
 }
 
 func generateNetworkInfos(info map[string]interface{}, defaultInterfaceModel string) ([]source.NetworkInfo, error) {

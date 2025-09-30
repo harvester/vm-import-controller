@@ -16,6 +16,10 @@ func List() []crd.CRD {
 			return c.
 				WithColumn("Status", ".status.status")
 		}),
+		newCRD("migration.harvesterhci.io", &migration.OvaSource{}, func(c crd.CRD) crd.CRD {
+			return c.
+				WithColumn("Status", ".status.status")
+		}),
 		newCRD("migration.harvesterhci.io", &migration.OpenstackSource{}, func(c crd.CRD) crd.CRD {
 			return c.
 				WithColumn("Status", ".status.status")

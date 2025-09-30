@@ -29,6 +29,7 @@ import (
 
 var (
 	OpenstackSourceResourceName      = "openstacksources"
+	OvaSourceResourceName            = "ovasources"
 	VirtualMachineImportResourceName = "virtualmachineimports"
 	VmwareSourceResourceName         = "vmwaresources"
 )
@@ -56,6 +57,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(SchemeGroupVersion,
 		&OpenstackSource{},
 		&OpenstackSourceList{},
+		&OvaSource{},
+		&OvaSourceList{},
 		&VirtualMachineImport{},
 		&VirtualMachineImportList{},
 		&VmwareSource{},
