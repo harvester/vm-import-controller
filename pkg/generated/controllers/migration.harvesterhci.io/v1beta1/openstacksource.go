@@ -20,262 +20,54 @@ package v1beta1
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	v1beta1 "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
-	"github.com/rancher/lasso/pkg/client"
-	"github.com/rancher/lasso/pkg/controller"
 	"github.com/rancher/wrangler/v3/pkg/apply"
 	"github.com/rancher/wrangler/v3/pkg/condition"
 	"github.com/rancher/wrangler/v3/pkg/generic"
 	"github.com/rancher/wrangler/v3/pkg/kv"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/tools/cache"
 )
 
-type OpenstackSourceHandler func(string, *v1beta1.OpenstackSource) (*v1beta1.OpenstackSource, error)
-
+// OpenstackSourceController interface for managing OpenstackSource resources.
 type OpenstackSourceController interface {
-	generic.ControllerMeta
-	OpenstackSourceClient
-
-	OnChange(ctx context.Context, name string, sync OpenstackSourceHandler)
-	OnRemove(ctx context.Context, name string, sync OpenstackSourceHandler)
-	Enqueue(namespace, name string)
-	EnqueueAfter(namespace, name string, duration time.Duration)
-
-	Cache() OpenstackSourceCache
+	generic.ControllerInterface[*v1beta1.OpenstackSource, *v1beta1.OpenstackSourceList]
 }
 
+// OpenstackSourceClient interface for managing OpenstackSource resources in Kubernetes.
 type OpenstackSourceClient interface {
-	Create(*v1beta1.OpenstackSource) (*v1beta1.OpenstackSource, error)
-	Update(*v1beta1.OpenstackSource) (*v1beta1.OpenstackSource, error)
-	UpdateStatus(*v1beta1.OpenstackSource) (*v1beta1.OpenstackSource, error)
-	Delete(namespace, name string, options *metav1.DeleteOptions) error
-	Get(namespace, name string, options metav1.GetOptions) (*v1beta1.OpenstackSource, error)
-	List(namespace string, opts metav1.ListOptions) (*v1beta1.OpenstackSourceList, error)
-	Watch(namespace string, opts metav1.ListOptions) (watch.Interface, error)
-	Patch(namespace, name string, pt types.PatchType, data []byte, subresources ...string) (result *v1beta1.OpenstackSource, err error)
+	generic.ClientInterface[*v1beta1.OpenstackSource, *v1beta1.OpenstackSourceList]
 }
 
+// OpenstackSourceCache interface for retrieving OpenstackSource resources in memory.
 type OpenstackSourceCache interface {
-	Get(namespace, name string) (*v1beta1.OpenstackSource, error)
-	List(namespace string, selector labels.Selector) ([]*v1beta1.OpenstackSource, error)
-
-	AddIndexer(indexName string, indexer OpenstackSourceIndexer)
-	GetByIndex(indexName, key string) ([]*v1beta1.OpenstackSource, error)
+	generic.CacheInterface[*v1beta1.OpenstackSource]
 }
 
-type OpenstackSourceIndexer func(obj *v1beta1.OpenstackSource) ([]string, error)
-
-type openstackSourceController struct {
-	controller    controller.SharedController
-	client        *client.Client
-	gvk           schema.GroupVersionKind
-	groupResource schema.GroupResource
-}
-
-func NewOpenstackSourceController(gvk schema.GroupVersionKind, resource string, namespaced bool, controller controller.SharedControllerFactory) OpenstackSourceController {
-	c := controller.ForResourceKind(gvk.GroupVersion().WithResource(resource), gvk.Kind, namespaced)
-	return &openstackSourceController{
-		controller: c,
-		client:     c.Client(),
-		gvk:        gvk,
-		groupResource: schema.GroupResource{
-			Group:    gvk.Group,
-			Resource: resource,
-		},
-	}
-}
-
-func FromOpenstackSourceHandlerToHandler(sync OpenstackSourceHandler) generic.Handler {
-	return func(key string, obj runtime.Object) (ret runtime.Object, err error) {
-		var v *v1beta1.OpenstackSource
-		if obj == nil {
-			v, err = sync(key, nil)
-		} else {
-			v, err = sync(key, obj.(*v1beta1.OpenstackSource))
-		}
-		if v == nil {
-			return nil, err
-		}
-		return v, err
-	}
-}
-
-func (c *openstackSourceController) Updater() generic.Updater {
-	return func(obj runtime.Object) (runtime.Object, error) {
-		newObj, err := c.Update(obj.(*v1beta1.OpenstackSource))
-		if newObj == nil {
-			return nil, err
-		}
-		return newObj, err
-	}
-}
-
-func UpdateOpenstackSourceDeepCopyOnChange(client OpenstackSourceClient, obj *v1beta1.OpenstackSource, handler func(obj *v1beta1.OpenstackSource) (*v1beta1.OpenstackSource, error)) (*v1beta1.OpenstackSource, error) {
-	if obj == nil {
-		return obj, nil
-	}
-
-	copyObj := obj.DeepCopy()
-	newObj, err := handler(copyObj)
-	if newObj != nil {
-		copyObj = newObj
-	}
-	if obj.ResourceVersion == copyObj.ResourceVersion && !equality.Semantic.DeepEqual(obj, copyObj) {
-		return client.Update(copyObj)
-	}
-
-	return copyObj, err
-}
-
-func (c *openstackSourceController) AddGenericHandler(ctx context.Context, name string, handler generic.Handler) {
-	c.controller.RegisterHandler(ctx, name, controller.SharedControllerHandlerFunc(handler))
-}
-
-func (c *openstackSourceController) AddGenericRemoveHandler(ctx context.Context, name string, handler generic.Handler) {
-	c.AddGenericHandler(ctx, name, generic.NewRemoveHandler(name, c.Updater(), handler))
-}
-
-func (c *openstackSourceController) OnChange(ctx context.Context, name string, sync OpenstackSourceHandler) {
-	c.AddGenericHandler(ctx, name, FromOpenstackSourceHandlerToHandler(sync))
-}
-
-func (c *openstackSourceController) OnRemove(ctx context.Context, name string, sync OpenstackSourceHandler) {
-	c.AddGenericHandler(ctx, name, generic.NewRemoveHandler(name, c.Updater(), FromOpenstackSourceHandlerToHandler(sync)))
-}
-
-func (c *openstackSourceController) Enqueue(namespace, name string) {
-	c.controller.Enqueue(namespace, name)
-}
-
-func (c *openstackSourceController) EnqueueAfter(namespace, name string, duration time.Duration) {
-	c.controller.EnqueueAfter(namespace, name, duration)
-}
-
-func (c *openstackSourceController) Informer() cache.SharedIndexInformer {
-	return c.controller.Informer()
-}
-
-func (c *openstackSourceController) GroupVersionKind() schema.GroupVersionKind {
-	return c.gvk
-}
-
-func (c *openstackSourceController) Cache() OpenstackSourceCache {
-	return &openstackSourceCache{
-		indexer:  c.Informer().GetIndexer(),
-		resource: c.groupResource,
-	}
-}
-
-func (c *openstackSourceController) Create(obj *v1beta1.OpenstackSource) (*v1beta1.OpenstackSource, error) {
-	result := &v1beta1.OpenstackSource{}
-	return result, c.client.Create(context.TODO(), obj.Namespace, obj, result, metav1.CreateOptions{})
-}
-
-func (c *openstackSourceController) Update(obj *v1beta1.OpenstackSource) (*v1beta1.OpenstackSource, error) {
-	result := &v1beta1.OpenstackSource{}
-	return result, c.client.Update(context.TODO(), obj.Namespace, obj, result, metav1.UpdateOptions{})
-}
-
-func (c *openstackSourceController) UpdateStatus(obj *v1beta1.OpenstackSource) (*v1beta1.OpenstackSource, error) {
-	result := &v1beta1.OpenstackSource{}
-	return result, c.client.UpdateStatus(context.TODO(), obj.Namespace, obj, result, metav1.UpdateOptions{})
-}
-
-func (c *openstackSourceController) Delete(namespace, name string, options *metav1.DeleteOptions) error {
-	if options == nil {
-		options = &metav1.DeleteOptions{}
-	}
-	return c.client.Delete(context.TODO(), namespace, name, *options)
-}
-
-func (c *openstackSourceController) Get(namespace, name string, options metav1.GetOptions) (*v1beta1.OpenstackSource, error) {
-	result := &v1beta1.OpenstackSource{}
-	return result, c.client.Get(context.TODO(), namespace, name, result, options)
-}
-
-func (c *openstackSourceController) List(namespace string, opts metav1.ListOptions) (*v1beta1.OpenstackSourceList, error) {
-	result := &v1beta1.OpenstackSourceList{}
-	return result, c.client.List(context.TODO(), namespace, result, opts)
-}
-
-func (c *openstackSourceController) Watch(namespace string, opts metav1.ListOptions) (watch.Interface, error) {
-	return c.client.Watch(context.TODO(), namespace, opts)
-}
-
-func (c *openstackSourceController) Patch(namespace, name string, pt types.PatchType, data []byte, subresources ...string) (*v1beta1.OpenstackSource, error) {
-	result := &v1beta1.OpenstackSource{}
-	return result, c.client.Patch(context.TODO(), namespace, name, pt, data, result, metav1.PatchOptions{}, subresources...)
-}
-
-type openstackSourceCache struct {
-	indexer  cache.Indexer
-	resource schema.GroupResource
-}
-
-func (c *openstackSourceCache) Get(namespace, name string) (*v1beta1.OpenstackSource, error) {
-	obj, exists, err := c.indexer.GetByKey(namespace + "/" + name)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, errors.NewNotFound(c.resource, name)
-	}
-	return obj.(*v1beta1.OpenstackSource), nil
-}
-
-func (c *openstackSourceCache) List(namespace string, selector labels.Selector) (ret []*v1beta1.OpenstackSource, err error) {
-
-	err = cache.ListAllByNamespace(c.indexer, namespace, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1beta1.OpenstackSource))
-	})
-
-	return ret, err
-}
-
-func (c *openstackSourceCache) AddIndexer(indexName string, indexer OpenstackSourceIndexer) {
-	utilruntime.Must(c.indexer.AddIndexers(map[string]cache.IndexFunc{
-		indexName: func(obj interface{}) (strings []string, e error) {
-			return indexer(obj.(*v1beta1.OpenstackSource))
-		},
-	}))
-}
-
-func (c *openstackSourceCache) GetByIndex(indexName, key string) (result []*v1beta1.OpenstackSource, err error) {
-	objs, err := c.indexer.ByIndex(indexName, key)
-	if err != nil {
-		return nil, err
-	}
-	result = make([]*v1beta1.OpenstackSource, 0, len(objs))
-	for _, obj := range objs {
-		result = append(result, obj.(*v1beta1.OpenstackSource))
-	}
-	return result, nil
-}
-
+// OpenstackSourceStatusHandler is executed for every added or modified OpenstackSource. Should return the new status to be updated
 type OpenstackSourceStatusHandler func(obj *v1beta1.OpenstackSource, status v1beta1.OpenstackSourceStatus) (v1beta1.OpenstackSourceStatus, error)
 
+// OpenstackSourceGeneratingHandler is the top-level handler that is executed for every OpenstackSource event. It extends OpenstackSourceStatusHandler by a returning a slice of child objects to be passed to apply.Apply
 type OpenstackSourceGeneratingHandler func(obj *v1beta1.OpenstackSource, status v1beta1.OpenstackSourceStatus) ([]runtime.Object, v1beta1.OpenstackSourceStatus, error)
 
+// RegisterOpenstackSourceStatusHandler configures a OpenstackSourceController to execute a OpenstackSourceStatusHandler for every events observed.
+// If a non-empty condition is provided, it will be updated in the status conditions for every handler execution
 func RegisterOpenstackSourceStatusHandler(ctx context.Context, controller OpenstackSourceController, condition condition.Cond, name string, handler OpenstackSourceStatusHandler) {
 	statusHandler := &openstackSourceStatusHandler{
 		client:    controller,
 		condition: condition,
 		handler:   handler,
 	}
-	controller.AddGenericHandler(ctx, name, FromOpenstackSourceHandlerToHandler(statusHandler.sync))
+	controller.AddGenericHandler(ctx, name, generic.FromObjectHandlerToHandler(statusHandler.sync))
 }
 
+// RegisterOpenstackSourceGeneratingHandler configures a OpenstackSourceController to execute a OpenstackSourceGeneratingHandler for every events observed, passing the returned objects to the provided apply.Apply.
+// If a non-empty condition is provided, it will be updated in the status conditions for every handler execution
 func RegisterOpenstackSourceGeneratingHandler(ctx context.Context, controller OpenstackSourceController, apply apply.Apply,
 	condition condition.Cond, name string, handler OpenstackSourceGeneratingHandler, opts *generic.GeneratingHandlerOptions) {
 	statusHandler := &openstackSourceGeneratingHandler{
@@ -297,6 +89,7 @@ type openstackSourceStatusHandler struct {
 	handler   OpenstackSourceStatusHandler
 }
 
+// sync is executed on every resource addition or modification. Executes the configured handlers and sends the updated status to the Kubernetes API
 func (a *openstackSourceStatusHandler) sync(key string, obj *v1beta1.OpenstackSource) (*v1beta1.OpenstackSource, error) {
 	if obj == nil {
 		return obj, nil
@@ -342,8 +135,10 @@ type openstackSourceGeneratingHandler struct {
 	opts  generic.GeneratingHandlerOptions
 	gvk   schema.GroupVersionKind
 	name  string
+	seen  sync.Map
 }
 
+// Remove handles the observed deletion of a resource, cascade deleting every associated resource previously applied
 func (a *openstackSourceGeneratingHandler) Remove(key string, obj *v1beta1.OpenstackSource) (*v1beta1.OpenstackSource, error) {
 	if obj != nil {
 		return obj, nil
@@ -353,12 +148,17 @@ func (a *openstackSourceGeneratingHandler) Remove(key string, obj *v1beta1.Opens
 	obj.Namespace, obj.Name = kv.RSplit(key, "/")
 	obj.SetGroupVersionKind(a.gvk)
 
+	if a.opts.UniqueApplyForResourceVersion {
+		a.seen.Delete(key)
+	}
+
 	return nil, generic.ConfigureApplyForObject(a.apply, obj, &a.opts).
 		WithOwner(obj).
 		WithSetID(a.name).
 		ApplyObjects()
 }
 
+// Handle executes the configured OpenstackSourceGeneratingHandler and pass the resulting objects to apply.Apply, finally returning the new status of the resource
 func (a *openstackSourceGeneratingHandler) Handle(obj *v1beta1.OpenstackSource, status v1beta1.OpenstackSourceStatus) (v1beta1.OpenstackSourceStatus, error) {
 	if !obj.DeletionTimestamp.IsZero() {
 		return status, nil
@@ -368,9 +168,41 @@ func (a *openstackSourceGeneratingHandler) Handle(obj *v1beta1.OpenstackSource, 
 	if err != nil {
 		return newStatus, err
 	}
+	if !a.isNewResourceVersion(obj) {
+		return newStatus, nil
+	}
 
-	return newStatus, generic.ConfigureApplyForObject(a.apply, obj, &a.opts).
+	err = generic.ConfigureApplyForObject(a.apply, obj, &a.opts).
 		WithOwner(obj).
 		WithSetID(a.name).
 		ApplyObjects(objs...)
+	if err != nil {
+		return newStatus, err
+	}
+	a.storeResourceVersion(obj)
+	return newStatus, nil
+}
+
+// isNewResourceVersion detects if a specific resource version was already successfully processed.
+// Only used if UniqueApplyForResourceVersion is set in generic.GeneratingHandlerOptions
+func (a *openstackSourceGeneratingHandler) isNewResourceVersion(obj *v1beta1.OpenstackSource) bool {
+	if !a.opts.UniqueApplyForResourceVersion {
+		return true
+	}
+
+	// Apply once per resource version
+	key := obj.Namespace + "/" + obj.Name
+	previous, ok := a.seen.Load(key)
+	return !ok || previous != obj.ResourceVersion
+}
+
+// storeResourceVersion keeps track of the latest resource version of an object for which Apply was executed
+// Only used if UniqueApplyForResourceVersion is set in generic.GeneratingHandlerOptions
+func (a *openstackSourceGeneratingHandler) storeResourceVersion(obj *v1beta1.OpenstackSource) {
+	if !a.opts.UniqueApplyForResourceVersion {
+		return
+	}
+
+	key := obj.Namespace + "/" + obj.Name
+	a.seen.Store(key, obj.ResourceVersion)
 }

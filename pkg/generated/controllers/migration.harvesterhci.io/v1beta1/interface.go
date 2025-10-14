@@ -21,6 +21,7 @@ package v1beta1
 import (
 	v1beta1 "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/rancher/lasso/pkg/controller"
+	"github.com/rancher/wrangler/v3/pkg/generic"
 	"github.com/rancher/wrangler/v3/pkg/schemes"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
@@ -45,12 +46,14 @@ type version struct {
 	controllerFactory controller.SharedControllerFactory
 }
 
-func (c *version) OpenstackSource() OpenstackSourceController {
-	return NewOpenstackSourceController(schema.GroupVersionKind{Group: "migration.harvesterhci.io", Version: "v1beta1", Kind: "OpenstackSource"}, "openstacksources", true, c.controllerFactory)
+func (v *version) OpenstackSource() OpenstackSourceController {
+	return generic.NewController[*v1beta1.OpenstackSource, *v1beta1.OpenstackSourceList](schema.GroupVersionKind{Group: "migration.harvesterhci.io", Version: "v1beta1", Kind: "OpenstackSource"}, "openstacksources", true, v.controllerFactory)
 }
-func (c *version) VirtualMachineImport() VirtualMachineImportController {
-	return NewVirtualMachineImportController(schema.GroupVersionKind{Group: "migration.harvesterhci.io", Version: "v1beta1", Kind: "VirtualMachineImport"}, "virtualmachineimports", true, c.controllerFactory)
+
+func (v *version) VirtualMachineImport() VirtualMachineImportController {
+	return generic.NewController[*v1beta1.VirtualMachineImport, *v1beta1.VirtualMachineImportList](schema.GroupVersionKind{Group: "migration.harvesterhci.io", Version: "v1beta1", Kind: "VirtualMachineImport"}, "virtualmachineimports", true, v.controllerFactory)
 }
-func (c *version) VmwareSource() VmwareSourceController {
-	return NewVmwareSourceController(schema.GroupVersionKind{Group: "migration.harvesterhci.io", Version: "v1beta1", Kind: "VmwareSource"}, "vmwaresources", true, c.controllerFactory)
+
+func (v *version) VmwareSource() VmwareSourceController {
+	return generic.NewController[*v1beta1.VmwareSource, *v1beta1.VmwareSourceList](schema.GroupVersionKind{Group: "migration.harvesterhci.io", Version: "v1beta1", Kind: "VmwareSource"}, "vmwaresources", true, v.controllerFactory)
 }
