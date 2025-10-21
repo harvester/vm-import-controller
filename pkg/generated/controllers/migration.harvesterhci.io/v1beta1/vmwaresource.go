@@ -20,262 +20,54 @@ package v1beta1
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	v1beta1 "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
-	"github.com/rancher/lasso/pkg/client"
-	"github.com/rancher/lasso/pkg/controller"
 	"github.com/rancher/wrangler/v3/pkg/apply"
 	"github.com/rancher/wrangler/v3/pkg/condition"
 	"github.com/rancher/wrangler/v3/pkg/generic"
 	"github.com/rancher/wrangler/v3/pkg/kv"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/tools/cache"
 )
 
-type VmwareSourceHandler func(string, *v1beta1.VmwareSource) (*v1beta1.VmwareSource, error)
-
+// VmwareSourceController interface for managing VmwareSource resources.
 type VmwareSourceController interface {
-	generic.ControllerMeta
-	VmwareSourceClient
-
-	OnChange(ctx context.Context, name string, sync VmwareSourceHandler)
-	OnRemove(ctx context.Context, name string, sync VmwareSourceHandler)
-	Enqueue(namespace, name string)
-	EnqueueAfter(namespace, name string, duration time.Duration)
-
-	Cache() VmwareSourceCache
+	generic.ControllerInterface[*v1beta1.VmwareSource, *v1beta1.VmwareSourceList]
 }
 
+// VmwareSourceClient interface for managing VmwareSource resources in Kubernetes.
 type VmwareSourceClient interface {
-	Create(*v1beta1.VmwareSource) (*v1beta1.VmwareSource, error)
-	Update(*v1beta1.VmwareSource) (*v1beta1.VmwareSource, error)
-	UpdateStatus(*v1beta1.VmwareSource) (*v1beta1.VmwareSource, error)
-	Delete(namespace, name string, options *metav1.DeleteOptions) error
-	Get(namespace, name string, options metav1.GetOptions) (*v1beta1.VmwareSource, error)
-	List(namespace string, opts metav1.ListOptions) (*v1beta1.VmwareSourceList, error)
-	Watch(namespace string, opts metav1.ListOptions) (watch.Interface, error)
-	Patch(namespace, name string, pt types.PatchType, data []byte, subresources ...string) (result *v1beta1.VmwareSource, err error)
+	generic.ClientInterface[*v1beta1.VmwareSource, *v1beta1.VmwareSourceList]
 }
 
+// VmwareSourceCache interface for retrieving VmwareSource resources in memory.
 type VmwareSourceCache interface {
-	Get(namespace, name string) (*v1beta1.VmwareSource, error)
-	List(namespace string, selector labels.Selector) ([]*v1beta1.VmwareSource, error)
-
-	AddIndexer(indexName string, indexer VmwareSourceIndexer)
-	GetByIndex(indexName, key string) ([]*v1beta1.VmwareSource, error)
+	generic.CacheInterface[*v1beta1.VmwareSource]
 }
 
-type VmwareSourceIndexer func(obj *v1beta1.VmwareSource) ([]string, error)
-
-type vmwareSourceController struct {
-	controller    controller.SharedController
-	client        *client.Client
-	gvk           schema.GroupVersionKind
-	groupResource schema.GroupResource
-}
-
-func NewVmwareSourceController(gvk schema.GroupVersionKind, resource string, namespaced bool, controller controller.SharedControllerFactory) VmwareSourceController {
-	c := controller.ForResourceKind(gvk.GroupVersion().WithResource(resource), gvk.Kind, namespaced)
-	return &vmwareSourceController{
-		controller: c,
-		client:     c.Client(),
-		gvk:        gvk,
-		groupResource: schema.GroupResource{
-			Group:    gvk.Group,
-			Resource: resource,
-		},
-	}
-}
-
-func FromVmwareSourceHandlerToHandler(sync VmwareSourceHandler) generic.Handler {
-	return func(key string, obj runtime.Object) (ret runtime.Object, err error) {
-		var v *v1beta1.VmwareSource
-		if obj == nil {
-			v, err = sync(key, nil)
-		} else {
-			v, err = sync(key, obj.(*v1beta1.VmwareSource))
-		}
-		if v == nil {
-			return nil, err
-		}
-		return v, err
-	}
-}
-
-func (c *vmwareSourceController) Updater() generic.Updater {
-	return func(obj runtime.Object) (runtime.Object, error) {
-		newObj, err := c.Update(obj.(*v1beta1.VmwareSource))
-		if newObj == nil {
-			return nil, err
-		}
-		return newObj, err
-	}
-}
-
-func UpdateVmwareSourceDeepCopyOnChange(client VmwareSourceClient, obj *v1beta1.VmwareSource, handler func(obj *v1beta1.VmwareSource) (*v1beta1.VmwareSource, error)) (*v1beta1.VmwareSource, error) {
-	if obj == nil {
-		return obj, nil
-	}
-
-	copyObj := obj.DeepCopy()
-	newObj, err := handler(copyObj)
-	if newObj != nil {
-		copyObj = newObj
-	}
-	if obj.ResourceVersion == copyObj.ResourceVersion && !equality.Semantic.DeepEqual(obj, copyObj) {
-		return client.Update(copyObj)
-	}
-
-	return copyObj, err
-}
-
-func (c *vmwareSourceController) AddGenericHandler(ctx context.Context, name string, handler generic.Handler) {
-	c.controller.RegisterHandler(ctx, name, controller.SharedControllerHandlerFunc(handler))
-}
-
-func (c *vmwareSourceController) AddGenericRemoveHandler(ctx context.Context, name string, handler generic.Handler) {
-	c.AddGenericHandler(ctx, name, generic.NewRemoveHandler(name, c.Updater(), handler))
-}
-
-func (c *vmwareSourceController) OnChange(ctx context.Context, name string, sync VmwareSourceHandler) {
-	c.AddGenericHandler(ctx, name, FromVmwareSourceHandlerToHandler(sync))
-}
-
-func (c *vmwareSourceController) OnRemove(ctx context.Context, name string, sync VmwareSourceHandler) {
-	c.AddGenericHandler(ctx, name, generic.NewRemoveHandler(name, c.Updater(), FromVmwareSourceHandlerToHandler(sync)))
-}
-
-func (c *vmwareSourceController) Enqueue(namespace, name string) {
-	c.controller.Enqueue(namespace, name)
-}
-
-func (c *vmwareSourceController) EnqueueAfter(namespace, name string, duration time.Duration) {
-	c.controller.EnqueueAfter(namespace, name, duration)
-}
-
-func (c *vmwareSourceController) Informer() cache.SharedIndexInformer {
-	return c.controller.Informer()
-}
-
-func (c *vmwareSourceController) GroupVersionKind() schema.GroupVersionKind {
-	return c.gvk
-}
-
-func (c *vmwareSourceController) Cache() VmwareSourceCache {
-	return &vmwareSourceCache{
-		indexer:  c.Informer().GetIndexer(),
-		resource: c.groupResource,
-	}
-}
-
-func (c *vmwareSourceController) Create(obj *v1beta1.VmwareSource) (*v1beta1.VmwareSource, error) {
-	result := &v1beta1.VmwareSource{}
-	return result, c.client.Create(context.TODO(), obj.Namespace, obj, result, metav1.CreateOptions{})
-}
-
-func (c *vmwareSourceController) Update(obj *v1beta1.VmwareSource) (*v1beta1.VmwareSource, error) {
-	result := &v1beta1.VmwareSource{}
-	return result, c.client.Update(context.TODO(), obj.Namespace, obj, result, metav1.UpdateOptions{})
-}
-
-func (c *vmwareSourceController) UpdateStatus(obj *v1beta1.VmwareSource) (*v1beta1.VmwareSource, error) {
-	result := &v1beta1.VmwareSource{}
-	return result, c.client.UpdateStatus(context.TODO(), obj.Namespace, obj, result, metav1.UpdateOptions{})
-}
-
-func (c *vmwareSourceController) Delete(namespace, name string, options *metav1.DeleteOptions) error {
-	if options == nil {
-		options = &metav1.DeleteOptions{}
-	}
-	return c.client.Delete(context.TODO(), namespace, name, *options)
-}
-
-func (c *vmwareSourceController) Get(namespace, name string, options metav1.GetOptions) (*v1beta1.VmwareSource, error) {
-	result := &v1beta1.VmwareSource{}
-	return result, c.client.Get(context.TODO(), namespace, name, result, options)
-}
-
-func (c *vmwareSourceController) List(namespace string, opts metav1.ListOptions) (*v1beta1.VmwareSourceList, error) {
-	result := &v1beta1.VmwareSourceList{}
-	return result, c.client.List(context.TODO(), namespace, result, opts)
-}
-
-func (c *vmwareSourceController) Watch(namespace string, opts metav1.ListOptions) (watch.Interface, error) {
-	return c.client.Watch(context.TODO(), namespace, opts)
-}
-
-func (c *vmwareSourceController) Patch(namespace, name string, pt types.PatchType, data []byte, subresources ...string) (*v1beta1.VmwareSource, error) {
-	result := &v1beta1.VmwareSource{}
-	return result, c.client.Patch(context.TODO(), namespace, name, pt, data, result, metav1.PatchOptions{}, subresources...)
-}
-
-type vmwareSourceCache struct {
-	indexer  cache.Indexer
-	resource schema.GroupResource
-}
-
-func (c *vmwareSourceCache) Get(namespace, name string) (*v1beta1.VmwareSource, error) {
-	obj, exists, err := c.indexer.GetByKey(namespace + "/" + name)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, errors.NewNotFound(c.resource, name)
-	}
-	return obj.(*v1beta1.VmwareSource), nil
-}
-
-func (c *vmwareSourceCache) List(namespace string, selector labels.Selector) (ret []*v1beta1.VmwareSource, err error) {
-
-	err = cache.ListAllByNamespace(c.indexer, namespace, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1beta1.VmwareSource))
-	})
-
-	return ret, err
-}
-
-func (c *vmwareSourceCache) AddIndexer(indexName string, indexer VmwareSourceIndexer) {
-	utilruntime.Must(c.indexer.AddIndexers(map[string]cache.IndexFunc{
-		indexName: func(obj interface{}) (strings []string, e error) {
-			return indexer(obj.(*v1beta1.VmwareSource))
-		},
-	}))
-}
-
-func (c *vmwareSourceCache) GetByIndex(indexName, key string) (result []*v1beta1.VmwareSource, err error) {
-	objs, err := c.indexer.ByIndex(indexName, key)
-	if err != nil {
-		return nil, err
-	}
-	result = make([]*v1beta1.VmwareSource, 0, len(objs))
-	for _, obj := range objs {
-		result = append(result, obj.(*v1beta1.VmwareSource))
-	}
-	return result, nil
-}
-
+// VmwareSourceStatusHandler is executed for every added or modified VmwareSource. Should return the new status to be updated
 type VmwareSourceStatusHandler func(obj *v1beta1.VmwareSource, status v1beta1.VmwareSourceStatus) (v1beta1.VmwareSourceStatus, error)
 
+// VmwareSourceGeneratingHandler is the top-level handler that is executed for every VmwareSource event. It extends VmwareSourceStatusHandler by a returning a slice of child objects to be passed to apply.Apply
 type VmwareSourceGeneratingHandler func(obj *v1beta1.VmwareSource, status v1beta1.VmwareSourceStatus) ([]runtime.Object, v1beta1.VmwareSourceStatus, error)
 
+// RegisterVmwareSourceStatusHandler configures a VmwareSourceController to execute a VmwareSourceStatusHandler for every events observed.
+// If a non-empty condition is provided, it will be updated in the status conditions for every handler execution
 func RegisterVmwareSourceStatusHandler(ctx context.Context, controller VmwareSourceController, condition condition.Cond, name string, handler VmwareSourceStatusHandler) {
 	statusHandler := &vmwareSourceStatusHandler{
 		client:    controller,
 		condition: condition,
 		handler:   handler,
 	}
-	controller.AddGenericHandler(ctx, name, FromVmwareSourceHandlerToHandler(statusHandler.sync))
+	controller.AddGenericHandler(ctx, name, generic.FromObjectHandlerToHandler(statusHandler.sync))
 }
 
+// RegisterVmwareSourceGeneratingHandler configures a VmwareSourceController to execute a VmwareSourceGeneratingHandler for every events observed, passing the returned objects to the provided apply.Apply.
+// If a non-empty condition is provided, it will be updated in the status conditions for every handler execution
 func RegisterVmwareSourceGeneratingHandler(ctx context.Context, controller VmwareSourceController, apply apply.Apply,
 	condition condition.Cond, name string, handler VmwareSourceGeneratingHandler, opts *generic.GeneratingHandlerOptions) {
 	statusHandler := &vmwareSourceGeneratingHandler{
@@ -297,6 +89,7 @@ type vmwareSourceStatusHandler struct {
 	handler   VmwareSourceStatusHandler
 }
 
+// sync is executed on every resource addition or modification. Executes the configured handlers and sends the updated status to the Kubernetes API
 func (a *vmwareSourceStatusHandler) sync(key string, obj *v1beta1.VmwareSource) (*v1beta1.VmwareSource, error) {
 	if obj == nil {
 		return obj, nil
@@ -342,8 +135,10 @@ type vmwareSourceGeneratingHandler struct {
 	opts  generic.GeneratingHandlerOptions
 	gvk   schema.GroupVersionKind
 	name  string
+	seen  sync.Map
 }
 
+// Remove handles the observed deletion of a resource, cascade deleting every associated resource previously applied
 func (a *vmwareSourceGeneratingHandler) Remove(key string, obj *v1beta1.VmwareSource) (*v1beta1.VmwareSource, error) {
 	if obj != nil {
 		return obj, nil
@@ -353,12 +148,17 @@ func (a *vmwareSourceGeneratingHandler) Remove(key string, obj *v1beta1.VmwareSo
 	obj.Namespace, obj.Name = kv.RSplit(key, "/")
 	obj.SetGroupVersionKind(a.gvk)
 
+	if a.opts.UniqueApplyForResourceVersion {
+		a.seen.Delete(key)
+	}
+
 	return nil, generic.ConfigureApplyForObject(a.apply, obj, &a.opts).
 		WithOwner(obj).
 		WithSetID(a.name).
 		ApplyObjects()
 }
 
+// Handle executes the configured VmwareSourceGeneratingHandler and pass the resulting objects to apply.Apply, finally returning the new status of the resource
 func (a *vmwareSourceGeneratingHandler) Handle(obj *v1beta1.VmwareSource, status v1beta1.VmwareSourceStatus) (v1beta1.VmwareSourceStatus, error) {
 	if !obj.DeletionTimestamp.IsZero() {
 		return status, nil
@@ -368,9 +168,41 @@ func (a *vmwareSourceGeneratingHandler) Handle(obj *v1beta1.VmwareSource, status
 	if err != nil {
 		return newStatus, err
 	}
+	if !a.isNewResourceVersion(obj) {
+		return newStatus, nil
+	}
 
-	return newStatus, generic.ConfigureApplyForObject(a.apply, obj, &a.opts).
+	err = generic.ConfigureApplyForObject(a.apply, obj, &a.opts).
 		WithOwner(obj).
 		WithSetID(a.name).
 		ApplyObjects(objs...)
+	if err != nil {
+		return newStatus, err
+	}
+	a.storeResourceVersion(obj)
+	return newStatus, nil
+}
+
+// isNewResourceVersion detects if a specific resource version was already successfully processed.
+// Only used if UniqueApplyForResourceVersion is set in generic.GeneratingHandlerOptions
+func (a *vmwareSourceGeneratingHandler) isNewResourceVersion(obj *v1beta1.VmwareSource) bool {
+	if !a.opts.UniqueApplyForResourceVersion {
+		return true
+	}
+
+	// Apply once per resource version
+	key := obj.Namespace + "/" + obj.Name
+	previous, ok := a.seen.Load(key)
+	return !ok || previous != obj.ResourceVersion
+}
+
+// storeResourceVersion keeps track of the latest resource version of an object for which Apply was executed
+// Only used if UniqueApplyForResourceVersion is set in generic.GeneratingHandlerOptions
+func (a *vmwareSourceGeneratingHandler) storeResourceVersion(obj *v1beta1.VmwareSource) {
+	if !a.opts.UniqueApplyForResourceVersion {
+		return
+	}
+
+	key := obj.Namespace + "/" + obj.Name
+	a.seen.Store(key, obj.ResourceVersion)
 }
