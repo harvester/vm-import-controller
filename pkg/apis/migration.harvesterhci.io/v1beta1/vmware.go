@@ -1,20 +1,11 @@
 package v1beta1
 
 import (
-	"github.com/rancher/wrangler/v3/pkg/condition"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/harvester/vm-import-controller/pkg/apis/common"
-)
-
-type ClusterStatus string
-
-const (
-	ClusterReady          ClusterStatus  = "clusterReady"
-	ClusterNotReady       ClusterStatus  = "clusterNotReady"
-	ClusterReadyCondition condition.Cond = "ClusterReady"
-	ClusterErrorCondition condition.Cond = "ClusterError"
 )
 
 // +genclient
@@ -39,22 +30,33 @@ type VmwareSourceStatus struct {
 	Conditions []common.Condition `json:"conditions,omitempty"`
 }
 
-func (v *VmwareSource) ClusterStatus() ClusterStatus {
-	return v.Status.Status
+func (s *VmwareSource) NamespacedName() string {
+	return types.NamespacedName{
+		Namespace: s.Namespace,
+		Name:      s.Name,
+	}.String()
 }
 
-func (v *VmwareSource) SecretReference() corev1.SecretReference {
-	return v.Spec.Credentials
+func (s *VmwareSource) ClusterStatus() ClusterStatus {
+	return s.Status.Status
 }
 
-func (v *VmwareSource) GetKind() string {
-	return "vmwaresource"
+func (s *VmwareSource) HasSecret() bool {
+	return true
 }
 
-func (v *VmwareSource) GetConnectionInfo() (string, string) {
-	return v.Spec.EndpointAddress, v.Spec.Datacenter
+func (s *VmwareSource) SecretReference() *corev1.SecretReference {
+	return &s.Spec.Credentials
 }
 
-func (v *VmwareSource) GetOptions() interface{} {
+func (s *VmwareSource) GetKind() string {
+	return KindVmwareSource
+}
+
+func (s *VmwareSource) GetConnectionInfo() (string, string) {
+	return s.Spec.EndpointAddress, s.Spec.Datacenter
+}
+
+func (s *VmwareSource) GetOptions() interface{} {
 	return nil
 }

@@ -3,6 +3,7 @@ package v1beta1
 import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/harvester/vm-import-controller/pkg/apis/common"
 )
@@ -44,26 +45,37 @@ type OpenstackSourceOptions struct {
 	UploadImageRetryDelay int `json:"uploadImageRetryDelay,omitempty"`
 }
 
-func (o *OpenstackSource) ClusterStatus() ClusterStatus {
-	return o.Status.Status
+func (s *OpenstackSource) NamespacedName() string {
+	return types.NamespacedName{
+		Namespace: s.Namespace,
+		Name:      s.Name,
+	}.String()
 }
 
-func (o *OpenstackSource) SecretReference() corev1.SecretReference {
-	return o.Spec.Credentials
+func (s *OpenstackSource) ClusterStatus() ClusterStatus {
+	return s.Status.Status
 }
 
-func (o *OpenstackSource) GetKind() string {
-	return "openstacksource"
+func (s *OpenstackSource) HasSecret() bool {
+	return true
 }
 
-func (o *OpenstackSource) GetConnectionInfo() (string, string) {
-	return o.Spec.EndpointAddress, o.Spec.Region
+func (s *OpenstackSource) SecretReference() *corev1.SecretReference {
+	return &s.Spec.Credentials
 }
 
-// GetOptions returns the sanitized OpenstackSourceOptions. This means,
+func (s *OpenstackSource) GetKind() string {
+	return KindOpenstackSource
+}
+
+func (s *OpenstackSource) GetConnectionInfo() (string, string) {
+	return s.Spec.EndpointAddress, s.Spec.Region
+}
+
+// GetOptions returns the sanitized OpenstackSourceOptions. This means
 // optional values are set to their default values.
-func (o *OpenstackSource) GetOptions() interface{} {
-	options := o.Spec.OpenstackSourceOptions
+func (s *OpenstackSource) GetOptions() interface{} {
+	options := s.Spec.OpenstackSourceOptions
 	if options.UploadImageRetryCount <= 0 {
 		options.UploadImageRetryCount = OpenstackDefaultRetryCount
 	}

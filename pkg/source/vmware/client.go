@@ -20,7 +20,6 @@ import (
 	"github.com/vmware/govmomi/vim25/soap"
 	"github.com/vmware/govmomi/vim25/types"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	kubevirt "kubevirt.io/api/core/v1"
@@ -44,11 +43,11 @@ func NewClient(ctx context.Context, endpoint string, dc string, secret *corev1.S
 	var insecure bool
 	username, ok := secret.Data["username"]
 	if !ok {
-		return nil, fmt.Errorf("no key username found in secret %s", secret.Name)
+		return nil, fmt.Errorf("no key %q found in secret %s", "username", secret.Name)
 	}
 	password, ok := secret.Data["password"]
 	if !ok {
-		return nil, fmt.Errorf("no key password found in the secret %s", secret.Name)
+		return nil, fmt.Errorf("no key %q found in the secret %s", "password", secret.Name)
 	}
 
 	caCert, ok := secret.Data["caCert"]
@@ -96,39 +95,40 @@ func NewClient(ctx context.Context, endpoint string, dc string, secret *corev1.S
 	vmwareClient.ctx = ctx
 	vmwareClient.Client = c
 	vmwareClient.dc = dc
+
 	networkMap, err := GenerateNetworkMapByRef(ctx, c.Client)
 	if err != nil {
 		return nil, fmt.Errorf("error generating network map during client initialisation: %w", err)
 	}
 	vmwareClient.networkMapping = networkMap
-	return vmwareClient, nil
 
+	return vmwareClient, nil
 }
 
 func (c *Client) Close() error {
-	c.Client.CloseIdleConnections()
-	err := c.Client.Logout(c.ctx)
-	if err != nil {
-		return err
+	if c.Client != nil {
+		c.Client.CloseIdleConnections()
+		err := c.Client.Logout(c.ctx)
+		if err != nil {
+			return err
+		}
 	}
 	return os.Remove(c.tmpCerts)
 }
 
 // Verify checks is a verification check for migration provider to ensure that the config is valid
 // it is used to set the condition Ready on the migration provider.
-// for vmware client we verify if the DC exists
 func (c *Client) Verify() error {
+	// Verify if the DC exists.
 	f := find.NewFinder(c.Client.Client, true)
 	dc := c.dc
 	if !strings.HasPrefix(c.dc, "/") {
 		dc = fmt.Sprintf("/%s", c.dc)
 	}
-
 	dcObj, err := f.Datacenter(c.ctx, dc)
 	if err != nil {
 		return err
 	}
-
 	logrus.Infof("found dc: %v", dcObj)
 	return nil
 }
@@ -289,15 +289,22 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 	// converted disks need to be placed in the server.TmpDir from where they will be served
 	for i, d := range vm.Status.DiskImportStatus {
 		sourceFile := filepath.Join(tmpPath, d.Name)
-		rawDiskName := strings.Split(d.Name, ".vmdk")[0] + ".img"
+		rawDiskName := util.BaseName(d.Name) + ".img"
 		destFile := filepath.Join(server.TempDir(), rawDiskName)
+
 		err = qemu.ConvertVMDKtoRAW(sourceFile, destFile)
 		if err != nil {
 			return fmt.Errorf("error during conversion of VMDK to RAW disk: %v", err)
 		}
+
 		// update fields to reflect final location of raw image file
 		vm.Status.DiskImportStatus[i].DiskLocalPath = server.TempDir()
 		vm.Status.DiskImportStatus[i].Name = rawDiskName
+
+		err := os.Remove(sourceFile)
+		if err != nil {
+			logrus.Errorf("Failed to remove VMDK file: %v", err)
+		}
 	}
 	return nil
 }
@@ -382,57 +389,25 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 	// Need CPU, Socket, Memory, VirtualNIC information to perform the mapping
 	networkInfos := generateNetworkInfos(c.networkMapping, o.Config.Hardware.Device)
 
-	vmSpec := kubevirt.VirtualMachineSpec{
-		RunStrategy: &[]kubevirt.VirtualMachineRunStrategy{kubevirt.RunStrategyRerunOnFailure}[0],
-		Template: &kubevirt.VirtualMachineInstanceTemplateSpec{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					"harvesterhci.io/vmName": vm.Status.ImportedVirtualMachineName,
-				},
-			},
-			Spec: kubevirt.VirtualMachineInstanceSpec{
-				Domain: kubevirt.DomainSpec{
-					CPU: &kubevirt.CPU{
-						Cores:   uint32(o.Config.Hardware.NumCPU),            // nolint:gosec
-						Sockets: uint32(o.Config.Hardware.NumCoresPerSocket), // nolint:gosec
-						Threads: 1,
-					},
-					Memory: &kubevirt.Memory{
-						Guest: &[]resource.Quantity{resource.MustParse(fmt.Sprintf("%dM", o.Config.Hardware.MemoryMB))}[0],
-					},
-					Resources: kubevirt.ResourceRequirements{
-						Limits: corev1.ResourceList{
-							corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dM", o.Config.Hardware.MemoryMB)),
-							corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", o.Config.Hardware.NumCPU)),
-						},
-					},
-					Features: &kubevirt.Features{
-						ACPI: kubevirt.FeatureState{
-							Enabled: ptr.To(true),
-						},
-					},
-				},
-			},
+	vmSpec := source.NewVirtualMachineSpec(source.VirtualMachineSpecConfig{
+		Name: vm.Status.ImportedVirtualMachineName,
+		Hardware: source.Hardware{
+			NumCPU:            uint32(o.Config.Hardware.NumCPU),            // nolint:gosec
+			NumCoresPerSocket: uint32(o.Config.Hardware.NumCoresPerSocket), // nolint:gosec
+			MemoryMB:          int64(o.Config.Hardware.MemoryMB),
 		},
-	}
+	})
 
 	mappedNetwork := source.MapNetworks(networkInfos, vm.Spec.Mapping)
 	networkConfig, interfaceConfig := source.GenerateNetworkInterfaceConfigs(mappedNetwork, vm.GetDefaultNetworkInterfaceModel())
 
 	// Setup BIOS/EFI, SecureBoot and TPM settings.
-	uefi := strings.EqualFold(o.Config.Firmware, string(types.GuestOsDescriptorFirmwareTypeEfi))
-	secureBoot := false
-	if o.Config.BootOptions != nil {
-		secureBoot = ptr.Deref(o.Config.BootOptions.EfiSecureBootEnabled, false)
-	}
-	tpm := ptr.Deref(o.Summary.Config.TpmPresent, false)
-	if uefi {
-		source.VMSpecSetupUEFISettings(&vmSpec, secureBoot, tpm)
-	}
+	fw := getFirmwareSettings(&o)
+	source.ApplyFirmwareSettings(vmSpec, fw)
 
 	vmSpec.Template.Spec.Networks = networkConfig
 	vmSpec.Template.Spec.Domain.Devices.Interfaces = interfaceConfig
-	newVM.Spec = vmSpec
+	newVM.Spec = *vmSpec
 
 	// disk attachment needs query by core controller for storage classes, so will be added by the migration controller
 	return newVM, nil
@@ -581,7 +556,11 @@ func (c *Client) SanitizeVirtualMachineImport(vm *migration.VirtualMachineImport
 	return nil
 }
 
-// GenerateNetworkMayByRef lists all networks defined in the DC and converts them to
+func (c *Client) Cleanup(vm *migration.VirtualMachineImport) error {
+	return source.RemoveTempImageFiles(vm.Status.DiskImportStatus)
+}
+
+// GenerateNetworkMapByRef lists all networks defined in the DC and converts them to
 // network id: network name
 // this subsequently used to map a network id to network name if needed based on the type
 // of backing device for a nic
@@ -676,4 +655,16 @@ func isPoweredOff(ctx context.Context, vm *object.VirtualMachine) (bool, error) 
 		return false, fmt.Errorf("failed to get power state: %w", err)
 	}
 	return state == types.VirtualMachinePowerStatePoweredOff, nil
+}
+
+func getFirmwareSettings(o *mo.VirtualMachine) *source.Firmware {
+	fw := source.NewFirmware(false, false, false)
+
+	fw.UEFI = strings.EqualFold(o.Config.Firmware, string(types.GuestOsDescriptorFirmwareTypeEfi))
+	if o.Config.BootOptions != nil {
+		fw.SecureBoot = ptr.Deref(o.Config.BootOptions.EfiSecureBootEnabled, false)
+	}
+	fw.TPM = ptr.Deref(o.Summary.Config.TpmPresent, false)
+
+	return fw
 }

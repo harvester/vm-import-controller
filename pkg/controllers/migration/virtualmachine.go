@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +15,7 @@ import (
 	migrationController "github.com/harvester/vm-import-controller/pkg/generated/controllers/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/server"
 	"github.com/harvester/vm-import-controller/pkg/source/openstack"
+	"github.com/harvester/vm-import-controller/pkg/source/ova"
 	"github.com/harvester/vm-import-controller/pkg/source/vmware"
 	"github.com/harvester/vm-import-controller/pkg/util"
 
@@ -40,10 +39,11 @@ import (
 )
 
 const (
-	labelImported         = "migration.harvesterhci.io/imported"
-	labelImageDisplayName = "harvesterhci.io/imageDisplayName"
-	expectedAPIVersion    = "migration.harvesterhci.io/v1beta1"
-	errorClusterNotReady  = "source cluster not ready yet"
+	vmImportControllerName = "virtualmachine-import-controller"
+	labelImported          = "migration.harvesterhci.io/imported"
+	labelImageDisplayName  = "harvesterhci.io/imageDisplayName"
+	expectedAPIVersion     = "migration.harvesterhci.io/v1beta1"
+	errorClusterNotReady   = "source cluster not ready yet"
 )
 
 type VirtualMachineOperations interface {
@@ -63,18 +63,22 @@ type VirtualMachineOperations interface {
 	// IsPowerOffSupported checks if the source cluster supports powering off the VM
 	IsPowerOffSupported() bool
 
-	// IsPoweredOff will check the status of VM Power and return true if machine is powered off
+	// IsPoweredOff will check the status of VM Power and return true if the machine is powered off
 	IsPoweredOff(vm *migration.VirtualMachineImport) (bool, error)
 
 	GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*kubevirt.VirtualMachine, error)
 
-	// PreFlightChecks checks the cluster specific configurations.
+	// PreFlightChecks checks the cluster-specific configurations.
 	PreFlightChecks(vm *migration.VirtualMachineImport) error
+
+	// Cleanup is responsible for cleaning up any temporary data.
+	Cleanup(vm *migration.VirtualMachineImport) error
 }
 
 type virtualMachineHandler struct {
 	ctx       context.Context
 	vmware    migrationController.VmwareSourceController
+	ova       migrationController.OvaSourceController
 	openstack migrationController.OpenstackSourceController
 	secret    coreControllers.SecretController
 	importVM  migrationController.VirtualMachineImportController
@@ -85,13 +89,12 @@ type virtualMachineHandler struct {
 	nadCache  ctlcniv1.NetworkAttachmentDefinitionCache
 }
 
-func RegisterVMImportController(ctx context.Context, vmware migrationController.VmwareSourceController, openstack migrationController.OpenstackSourceController,
-	secret coreControllers.SecretController, importVM migrationController.VirtualMachineImportController, vmi harvester.VirtualMachineImageController, kubevirt kubevirtv1.VirtualMachineController, pvc coreControllers.PersistentVolumeClaimController, scCache storageControllers.StorageClassCache, nadCache ctlcniv1.NetworkAttachmentDefinitionCache) {
-
+func RegisterVMImportController(ctx context.Context, vmware migrationController.VmwareSourceController, openstack migrationController.OpenstackSourceController, ova migrationController.OvaSourceController, secret coreControllers.SecretController, importVM migrationController.VirtualMachineImportController, vmi harvester.VirtualMachineImageController, kubevirt kubevirtv1.VirtualMachineController, pvc coreControllers.PersistentVolumeClaimController, scCache storageControllers.StorageClassCache, nadCache ctlcniv1.NetworkAttachmentDefinitionCache) {
 	vmHandler := &virtualMachineHandler{
 		ctx:       ctx,
 		vmware:    vmware,
 		openstack: openstack,
+		ova:       ova,
 		secret:    secret,
 		importVM:  importVM,
 		vmi:       vmi,
@@ -102,7 +105,9 @@ func RegisterVMImportController(ctx context.Context, vmware migrationController.
 	}
 
 	relatedresource.Watch(ctx, "virtualmachineimage-change", vmHandler.ReconcileVMI, importVM, vmi)
-	importVM.OnChange(ctx, "virtualmachine-import-job-change", vmHandler.OnVirtualMachineChange)
+
+	importVM.OnChange(ctx, vmImportControllerName, vmHandler.OnVirtualMachineChange)
+	importVM.OnRemove(ctx, vmImportControllerName, vmHandler.OnVirtualMachineRemove)
 }
 
 func (h *virtualMachineHandler) OnVirtualMachineChange(_ string, vmObj *migration.VirtualMachineImport) (*migration.VirtualMachineImport, error) {
@@ -199,24 +204,48 @@ func (h *virtualMachineHandler) OnVirtualMachineChange(_ string, vmObj *migratio
 			"namespace":               vm.Namespace,
 			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
 		}).Info("The VM was imported successfully")
-		return vm, h.tidyUpObjects(vm)
+		return nil, h.tidyUpObjects(vm)
 	case migration.VirtualMachineImportInvalid:
 		logrus.WithFields(logrus.Fields{
 			"name":                    vm.Name,
 			"namespace":               vm.Namespace,
 			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
 		}).Error("The VM import spec is invalid")
-		return vm, nil
+		return nil, nil
 	case migration.VirtualMachineMigrationFailed:
 		logrus.WithFields(logrus.Fields{
 			"name":                    vm.Name,
 			"namespace":               vm.Namespace,
 			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
 		}).Error("The VM import has failed")
-		return vm, nil
+		return nil, h.triggerCleanup(vm)
 	}
 
-	return vm, nil
+	return nil, nil
+}
+
+func (h *virtualMachineHandler) OnVirtualMachineRemove(_ string, vmi *migration.VirtualMachineImport) (*migration.VirtualMachineImport, error) {
+	if vmi == nil {
+		return nil, nil
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"name":                    vmi.Name,
+		"namespace":               vmi.Namespace,
+		"spec.virtualMachineName": vmi.Spec.VirtualMachineName,
+	}).Info("Cleaning up temporary data ...")
+
+	err := h.triggerCleanup(vmi)
+	if err != nil {
+		// Just log the error and do not return it to prevent a reconciliation loop.
+		logrus.WithFields(logrus.Fields{
+			"name":                    vmi.Name,
+			"namespace":               vmi.Namespace,
+			"spec.virtualMachineName": vmi.Spec.VirtualMachineName,
+		}).Warningf("Failed to cleanup temporary data: %v", err)
+	}
+
+	return nil, nil
 }
 
 // preFlightChecks is used to validate that the associate sources and VM migration references are valid
@@ -229,13 +258,13 @@ func (h *virtualMachineHandler) preFlightChecks(vm *migration.VirtualMachineImpo
 	var err error
 
 	switch strings.ToLower(vm.Spec.SourceCluster.Kind) {
-	case "vmwaresource", "openstacksource":
+	case migration.KindVmwareSource, migration.KindOvaSource, migration.KindOpenstackSource:
 		ss, err = h.generateSource(vm)
 		if err != nil {
 			return fmt.Errorf("error generating migration in preflight checks: %v", err)
 		}
 	default:
-		return fmt.Errorf("unsupported migration kind. Currently supported values are vmware/openstack but got '%s'", strings.ToLower(vm.Spec.SourceCluster.Kind))
+		return fmt.Errorf("unsupported source kind %q", vm.Spec.SourceCluster.Kind)
 	}
 
 	if ss.ClusterStatus() != migration.ClusterReady {
@@ -303,7 +332,7 @@ func (h *virtualMachineHandler) preFlightChecks(vm *migration.VirtualMachineImpo
 	// checks.
 	vmo, err := h.generateVMO(vm)
 	if err != nil {
-		return fmt.Errorf("error generating VMO in preFlightChecks: %v", err)
+		return fmt.Errorf("error generating VMO in preFlightChecks: %w", err)
 	}
 
 	if vm.SkipPreflightChecks() {
@@ -376,7 +405,7 @@ func triggerPowerOff(vm *migration.VirtualMachineImport, vmo VirtualMachineOpera
 func (h *virtualMachineHandler) triggerExport(vm *migration.VirtualMachineImport) error {
 	vmo, err := h.generateVMO(vm)
 	if err != nil {
-		return fmt.Errorf("error generating VMO in trigger export: %v", err)
+		return fmt.Errorf("error generating VMO in triggerExport: %w", err)
 	}
 
 	// Trigger power off or shutdown guest OS of the source VM.
@@ -508,49 +537,61 @@ func (h *virtualMachineHandler) triggerExport(vm *migration.VirtualMachineImport
 func (h *virtualMachineHandler) generateVMO(vm *migration.VirtualMachineImport) (VirtualMachineOperations, error) {
 	source, err := h.generateSource(vm)
 	if err != nil {
-		return nil, fmt.Errorf("error generating migration interface: %v", err)
+		return nil, fmt.Errorf("failed to generate %q source interface: %w", vm.Spec.SourceCluster.Kind, err)
 	}
 
-	secretRef := source.SecretReference()
-	secret, err := h.secret.Get(secretRef.Namespace, secretRef.Name, metav1.GetOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("error fetching secret :%v", err)
+	// Secrets can be used optionally in `Source` CRs.
+	var secret *corev1.Secret
+	if source.HasSecret() {
+		secretRef := source.SecretReference()
+		if secretRef == nil {
+			return nil, fmt.Errorf("secret reference is nil")
+		}
+		secret, err = h.secret.Get(secretRef.Namespace, secretRef.Name, metav1.GetOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("error fetching secret: %w", err)
+		}
 	}
 
-	// generate VirtualMachineOperations Interface.
-	// this will be used for migration specific operations
-
-	if strings.EqualFold(source.GetKind(), "vmwaresource") {
+	// Generate `VirtualMachineOperations` interface which will be used for
+	// migration-specific operations.
+	switch strings.ToLower(source.GetKind()) {
+	case migration.KindVmwareSource:
 		endpoint, dc := source.GetConnectionInfo()
 		return vmware.NewClient(h.ctx, endpoint, dc, secret)
-	}
-
-	if strings.EqualFold(source.GetKind(), "openstacksource") {
+	case migration.KindOvaSource:
+		url, _ := source.GetConnectionInfo()
+		options := source.GetOptions().(migration.OvaSourceOptions)
+		return ova.NewClient(h.ctx, url, secret, options)
+	case migration.KindOpenstackSource:
 		endpoint, region := source.GetConnectionInfo()
 		options := source.GetOptions().(migration.OpenstackSourceOptions)
 		return openstack.NewClient(h.ctx, endpoint, region, secret, options)
 	}
 
-	return nil, fmt.Errorf("source kind '%s' not supported", source.GetKind())
+	return nil, fmt.Errorf("source kind %q not supported", source.GetKind())
 }
 
 func (h *virtualMachineHandler) generateSource(vm *migration.VirtualMachineImport) (migration.SourceInterface, error) {
-	var s migration.SourceInterface
+	var si migration.SourceInterface
 	var err error
-	if strings.EqualFold(vm.Spec.SourceCluster.Kind, "vmwaresource") {
-		s, err = h.vmware.Get(vm.Spec.SourceCluster.Namespace, vm.Spec.SourceCluster.Name, metav1.GetOptions{})
-		if err != nil {
-			return nil, err
-		}
-	}
-	if strings.EqualFold(vm.Spec.SourceCluster.Kind, "openstacksource") {
-		s, err = h.openstack.Get(vm.Spec.SourceCluster.Namespace, vm.Spec.SourceCluster.Name, metav1.GetOptions{})
-		if err != nil {
-			return nil, err
-		}
+
+	switch strings.ToLower(vm.Spec.SourceCluster.Kind) {
+	case migration.KindVmwareSource:
+		si, err = h.vmware.Get(vm.Spec.SourceCluster.Namespace, vm.Spec.SourceCluster.Name, metav1.GetOptions{})
+	case migration.KindOvaSource:
+		si, err = h.ova.Get(vm.Spec.SourceCluster.Namespace, vm.Spec.SourceCluster.Name, metav1.GetOptions{})
+	case migration.KindOpenstackSource:
+		si, err = h.openstack.Get(vm.Spec.SourceCluster.Namespace, vm.Spec.SourceCluster.Name, metav1.GetOptions{})
+	default:
+		err = fmt.Errorf("source kind %q not supported", vm.Spec.SourceCluster.Kind)
 	}
 
-	return s, nil
+	if err != nil {
+		return nil, err
+	}
+
+	return si, nil
 }
 
 func (h *virtualMachineHandler) createVirtualMachineImages(vm *migration.VirtualMachineImport) error {
@@ -623,7 +664,7 @@ func (h *virtualMachineHandler) reconcileVMIStatus(vm *migration.VirtualMachineI
 func (h *virtualMachineHandler) createVirtualMachine(vm *migration.VirtualMachineImport) error {
 	vmo, err := h.generateVMO(vm)
 	if err != nil {
-		return fmt.Errorf("error generating VMO in createVirtualMachine: %v", err)
+		return fmt.Errorf("error generating VMO in createVirtualMachine: %w", err)
 	}
 
 	runVM, err := vmo.GenerateVirtualMachine(vm)
@@ -820,11 +861,18 @@ func (h *virtualMachineHandler) tidyUpObjects(vm *migration.VirtualMachineImport
 		if err != nil {
 			return fmt.Errorf("error removing ownerReference for vmi %s :%v", vmiObj.Name, err)
 		}
-
-		// remove processed img files
-		_ = os.Remove(filepath.Join(server.TempDir(), v.Name))
 	}
-	return nil
+
+	return h.triggerCleanup(vm)
+}
+
+func (h *virtualMachineHandler) triggerCleanup(vmi *migration.VirtualMachineImport) error {
+	vmo, err := h.generateVMO(vmi)
+	if err != nil {
+		return fmt.Errorf("failed to generate VMO in triggerCleanup: %w", err)
+	}
+
+	return vmo.Cleanup(vmi)
 }
 
 func (h *virtualMachineHandler) checkAndCreateVirtualMachineImage(vm *migration.VirtualMachineImport, d migration.DiskInfo) (*harvesterv1beta1.VirtualMachineImage, error) {
@@ -913,7 +961,7 @@ func (h *virtualMachineHandler) checkAndCreateVirtualMachineImage(vm *migration.
 func (h *virtualMachineHandler) sanitizeVirtualMachineImport(vm *migration.VirtualMachineImport) (*migration.VirtualMachineImport, error) {
 	vmo, err := h.generateVMO(vm)
 	if err != nil {
-		return nil, fmt.Errorf("error generating VMO in sanitizeVirtualMachineImport: %v", err)
+		return nil, fmt.Errorf("error generating VMO in sanitizeVirtualMachineImport: %w", err)
 	}
 
 	err = vmo.SanitizeVirtualMachineImport(vm)

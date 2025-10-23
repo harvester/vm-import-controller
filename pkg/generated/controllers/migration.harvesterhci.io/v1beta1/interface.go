@@ -32,6 +32,7 @@ func init() {
 
 type Interface interface {
 	OpenstackSource() OpenstackSourceController
+	OvaSource() OvaSourceController
 	VirtualMachineImport() VirtualMachineImportController
 	VmwareSource() VmwareSourceController
 }
@@ -48,6 +49,10 @@ type version struct {
 
 func (v *version) OpenstackSource() OpenstackSourceController {
 	return generic.NewController[*v1beta1.OpenstackSource, *v1beta1.OpenstackSourceList](schema.GroupVersionKind{Group: "migration.harvesterhci.io", Version: "v1beta1", Kind: "OpenstackSource"}, "openstacksources", true, v.controllerFactory)
+}
+
+func (v *version) OvaSource() OvaSourceController {
+	return generic.NewController[*v1beta1.OvaSource, *v1beta1.OvaSourceList](schema.GroupVersionKind{Group: "migration.harvesterhci.io", Version: "v1beta1", Kind: "OvaSource"}, "ovasources", true, v.controllerFactory)
 }
 
 func (v *version) VirtualMachineImport() VirtualMachineImportController {

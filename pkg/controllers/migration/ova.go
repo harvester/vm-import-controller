@@ -13,57 +13,59 @@ import (
 	"github.com/harvester/vm-import-controller/pkg/apis/common"
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	migrationController "github.com/harvester/vm-import-controller/pkg/generated/controllers/migration.harvesterhci.io/v1beta1"
-	"github.com/harvester/vm-import-controller/pkg/source/vmware"
+	"github.com/harvester/vm-import-controller/pkg/source/ova"
 	"github.com/harvester/vm-import-controller/pkg/util"
 )
 
-type vmwareHandler struct {
+type ovaHandler struct {
 	ctx    context.Context
-	source migrationController.VmwareSourceController
+	source migrationController.OvaSourceController
 	secret corecontrollers.SecretController
 }
 
-func RegisterVmwareController(ctx context.Context, source migrationController.VmwareSourceController, secret corecontrollers.SecretController) {
-	vHandler := &vmwareHandler{
+func RegisterOvaController(ctx context.Context, source migrationController.OvaSourceController, secret corecontrollers.SecretController) {
+	handler := &ovaHandler{
 		ctx:    ctx,
 		source: source,
 		secret: secret,
 	}
-	source.OnChange(ctx, "vmware-source-change", vHandler.OnSourceChange)
+	source.OnChange(ctx, "ova-source-change", handler.OnSourceChange)
 }
 
-func (h *vmwareHandler) OnSourceChange(_ string, v *migration.VmwareSource) (*migration.VmwareSource, error) {
-	if v == nil || v.DeletionTimestamp != nil {
+func (h *ovaHandler) OnSourceChange(_ string, s *migration.OvaSource) (*migration.OvaSource, error) {
+	if s == nil || s.DeletionTimestamp != nil {
 		return nil, nil
 	}
 
 	logrus.WithFields(logrus.Fields{
-		"kind":      v.Kind,
-		"name":      v.Name,
-		"namespace": v.Namespace,
+		"kind":      s.Kind,
+		"name":      s.Name,
+		"namespace": s.Namespace,
 	}).Info("Reconciling source")
 
-	if v.Status.Status != migration.ClusterReady {
-		var client *vmware.Client
-		var err error
+	if s.Status.Status != migration.ClusterReady {
+		var secret *corev1.Secret
 
-		secretObj, err := h.secret.Get(v.SecretReference().Namespace, v.SecretReference().Name, metav1.GetOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("failed to lookup secret for %s migration %s: %w", v.Kind, v.NamespacedName(), err)
+		if s.HasSecret() {
+			var err error
+			secret, err = h.secret.Get(s.SecretReference().Namespace, s.SecretReference().Name, metav1.GetOptions{})
+			if err != nil {
+				return nil, fmt.Errorf("failed to lookup secret for %s migration %s: %w", s.Kind, s.NamespacedName(), err)
+			}
 		}
 
-		client, err = vmware.NewClient(h.ctx, v.Spec.EndpointAddress, v.Spec.Datacenter, secretObj)
+		client, err := ova.NewClient(h.ctx, s.Spec.Url, secret, s.GetOptions().(migration.OvaSourceOptions))
 		if err != nil {
-			return nil, fmt.Errorf("failed to generate client for %s migration %s: %w", v.Kind, v.NamespacedName(), err)
+			return nil, fmt.Errorf("failed to generate client for %s migration %s: %w", s.Kind, s.NamespacedName(), err)
 		}
 
 		err = client.Verify()
 		if err != nil {
 			logrus.WithFields(logrus.Fields{
-				"apiVersion": v.APIVersion,
-				"kind":       v.Kind,
-				"name":       v.Name,
-				"namespace":  v.Namespace,
+				"apiVersion": s.APIVersion,
+				"kind":       s.Kind,
+				"name":       s.Name,
+				"namespace":  s.Namespace,
 				"err":        err,
 			}).Error("Failed to verify source for migration")
 
@@ -82,8 +84,8 @@ func (h *vmwareHandler) OnSourceChange(_ string, v *migration.VmwareSource) (*mi
 				},
 			}
 
-			v.Status.Conditions = util.MergeConditions(v.Status.Conditions, conds)
-			v.Status.Status = migration.ClusterNotReady
+			s.Status.Conditions = util.MergeConditions(s.Status.Conditions, conds)
+			s.Status.Status = migration.ClusterNotReady
 		} else {
 			conds := []common.Condition{
 				{
@@ -99,11 +101,11 @@ func (h *vmwareHandler) OnSourceChange(_ string, v *migration.VmwareSource) (*mi
 				},
 			}
 
-			v.Status.Conditions = util.MergeConditions(v.Status.Conditions, conds)
-			v.Status.Status = migration.ClusterReady
+			s.Status.Conditions = util.MergeConditions(s.Status.Conditions, conds)
+			s.Status.Status = migration.ClusterReady
 		}
 
-		return h.source.UpdateStatus(v)
+		return h.source.UpdateStatus(s)
 	}
 
 	return nil, nil

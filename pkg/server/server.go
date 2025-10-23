@@ -10,12 +10,13 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-const defaultPort = 8080
-
-const tmpDir = "/tmp/vm-import-controller"
+const (
+	defaultPort = 8080
+	tmpDir      = "/tmp/vm-import-controller"
+)
 
 func NewServer(ctx context.Context) error {
-	err := createTmpDir()
+	err := createTempDir()
 	if err != nil {
 		return err
 	}
@@ -23,7 +24,6 @@ func NewServer(ctx context.Context) error {
 }
 
 func newServer(ctx context.Context, path string) error {
-	defer os.RemoveAll(tmpDir) //nolint:errcheck
 	srv := http.Server{
 		Addr: fmt.Sprintf(":%d", defaultPort),
 		// fix G114: Use of net/http serve function that has no support for setting timeouts (gosec)
@@ -45,11 +45,11 @@ func newServer(ctx context.Context, path string) error {
 	return eg.Wait()
 }
 
-func createTmpDir() error {
+func createTempDir() error {
 	_, err := os.Stat(tmpDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return os.Mkdir("/tmp/vm-import-controller", 0755)
+			return os.Mkdir(tmpDir, 0755)
 		}
 		return err
 	}

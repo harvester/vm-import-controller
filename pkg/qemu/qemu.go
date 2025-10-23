@@ -12,7 +12,10 @@ import (
 const defaultCommand = "qemu-wrapper.sh"
 
 func ConvertVMDKtoRAW(source, target string) error {
-	logrus.Infof("converting image %s to %s", source, target)
+	logrus.WithFields(logrus.Fields{
+		"source": source,
+		"target": target,
+	}).Info("Converting VMDK image to RAW ...")
 	args := []string{"convert", "-f", "vmdk", "-O", "raw", source, target}
 	return runCommand(defaultCommand, args...)
 }
