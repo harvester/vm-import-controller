@@ -2,7 +2,6 @@ package migration
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -43,7 +42,6 @@ const (
 	labelImported          = "migration.harvesterhci.io/imported"
 	labelImageDisplayName  = "harvesterhci.io/imageDisplayName"
 	expectedAPIVersion     = "migration.harvesterhci.io/v1beta1"
-	errorClusterNotReady   = "source cluster not ready yet"
 )
 
 type VirtualMachineOperations interface {
@@ -110,115 +108,100 @@ func RegisterVMImportController(ctx context.Context, vmware migrationController.
 	importVM.OnRemove(ctx, vmImportControllerName, vmHandler.OnVirtualMachineRemove)
 }
 
-func (h *virtualMachineHandler) OnVirtualMachineChange(_ string, vmObj *migration.VirtualMachineImport) (*migration.VirtualMachineImport, error) {
-	if vmObj == nil || vmObj.DeletionTimestamp != nil {
+func (h *virtualMachineHandler) OnVirtualMachineChange(_ string, vmi *migration.VirtualMachineImport) (*migration.VirtualMachineImport, error) {
+	if vmi == nil || vmi.DeletionTimestamp != nil {
 		return nil, nil
 	}
 
-	vm := vmObj.DeepCopy()
+	logrusEntry := logrus.WithFields(logrus.Fields{
+		"name":                    vmi.Name,
+		"namespace":               vmi.Namespace,
+		"spec.virtualMachineName": vmi.Spec.VirtualMachineName,
+	})
+	vmiCopy := vmi.DeepCopy()
 
-	switch vm.Status.Status {
+	switch vmiCopy.Status.Status {
 	case "":
-		// run preflight checks and make vm ready for import
-		logrus.WithFields(logrus.Fields{
-			"name":                    vm.Name,
-			"namespace":               vm.Namespace,
-			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
-		}).Info("Running preflight checks ...")
-		return h.reconcilePreFlightChecks(vm)
+		// run preflight checks and make vmiCopy ready for import
+		logrusEntry.Info("Running preflight checks ...")
+		return h.reconcilePreFlightChecks(vmiCopy)
 	case migration.VirtualMachineImportValid:
-		logrus.WithFields(logrus.Fields{
-			"name":                    vm.Name,
-			"namespace":               vm.Namespace,
-			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
-		}).Info("Sanitizing the import spec ...")
-		return h.sanitizeVirtualMachineImport(vm)
+		logrusEntry.Info("Sanitizing the import spec ...")
+		return h.abortMigrationIfNecessary(h.sanitizeVirtualMachineImport(vmiCopy))
 	case migration.SourceReady:
-		// vm migration is valid and ready. trigger migration specific import
-		logrus.WithFields(logrus.Fields{
-			"name":                    vm.Name,
-			"namespace":               vm.Namespace,
-			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
-		}).Info("Importing client disk images ...")
-		return h.runVirtualMachineExport(vm)
+		// vmiCopy migration is valid and ready. trigger migration specific import
+		logrusEntry.Info("Importing client disk images ...")
+		return h.abortMigrationIfNecessary(h.runVirtualMachineExport(vmiCopy))
 	case migration.DisksExported:
 		// prepare and add routes for disks to be used for VirtualMachineImage CRD
-		logrus.WithFields(logrus.Fields{
-			"name":                    vm.Name,
-			"namespace":               vm.Namespace,
-			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
-		}).Info("Creating VM images ...")
-		return h.reconcileDiskImageStatus(vm)
+		logrusEntry.Info("Creating VM images ...")
+		return h.reconcileDiskImageStatus(vmiCopy)
 	case migration.DiskImagesSubmitted:
 		// check and update disk image status based on VirtualMachineImage watches
-		logrus.WithFields(logrus.Fields{
-			"name":                    vm.Name,
-			"namespace":               vm.Namespace,
-			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
-		}).Info("Evaluating VM images ...")
-		err := h.reconcileVMIStatus(vm)
+		logrusEntry.Info("Evaluating VM images ...")
+
+		err := h.reconcileVMIStatus(vmiCopy)
 		if err != nil {
-			return vm, err
+			return vmiCopy, err
 		}
-		newStatus := evaluateDiskImportStatus(vm.Status.DiskImportStatus)
+
+		newStatus := evaluateDiskImportStatus(vmiCopy.Status.DiskImportStatus)
 		if newStatus == nil {
-			return vm, nil
+			return vmiCopy, nil
 		}
 
-		vm.Status.Status = *newStatus
+		vmiCopy.Status.Status = *newStatus
 
-		return h.importVM.UpdateStatus(vm)
+		return h.importVM.UpdateStatus(vmiCopy)
 	case migration.DiskImagesFailed:
-		logrus.WithFields(logrus.Fields{
-			"name":                    vm.Name,
-			"namespace":               vm.Namespace,
-			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
-		}).Error("Failed to import client disk images. Try again ...")
-		return h.triggerResubmit(vm)
+		logrusEntry.Error("Failed to import client disk images. Try again ...")
+		return h.triggerResubmit(vmiCopy)
 	case migration.DiskImagesReady:
 		// create VM to use the VirtualMachineObject
-		logrus.WithFields(logrus.Fields{
-			"name":                    vm.Name,
-			"namespace":               vm.Namespace,
-			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
-		}).Info("Creating VM instances ...")
-		err := h.createVirtualMachine(vm)
+		logrusEntry.Info("Creating VM instances ...")
+
+		err := h.createVirtualMachine(vmiCopy)
 		if err != nil {
-			return vm, err
+			return h.abortMigrationIfNecessary(vmiCopy, err)
 		}
 
-		vm.Status.Status = migration.VirtualMachineCreated
+		vmiCopy.Status.Status = migration.VirtualMachineCreated
 
-		return h.importVM.UpdateStatus(vm)
+		return h.importVM.UpdateStatus(vmiCopy)
 	case migration.VirtualMachineCreated:
 		// wait for VM to be running using a watch on VM's
-		logrus.WithFields(logrus.Fields{
-			"name":                    vm.Name,
-			"namespace":               vm.Namespace,
-			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
-		}).Info("Checking VM instances ...")
-		return h.reconcileVirtualMachineStatus(vm)
+		logrusEntry.Info("Checking VM instances ...")
+		return h.reconcileVirtualMachineStatus(vmiCopy)
 	case migration.VirtualMachineRunning:
-		logrus.WithFields(logrus.Fields{
-			"name":                    vm.Name,
-			"namespace":               vm.Namespace,
-			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
-		}).Info("The VM was imported successfully")
-		return nil, h.tidyUpObjects(vm)
+		logrusEntry.Info("Tidy up objects ...")
+
+		err := h.tidyUpObjects(vmiCopy)
+		if err != nil {
+			return nil, err
+		}
+
+		logrusEntry.Info("The VM was imported successfully")
+
+		err = h.triggerCleanup(vmiCopy)
+		if err != nil {
+			// Log the error and then drop it to prevent reconciliation loops.
+			logrusEntry.Errorf("An error occurred during cleanup: %v", err)
+		}
+
+		return nil, nil
 	case migration.VirtualMachineImportInvalid:
-		logrus.WithFields(logrus.Fields{
-			"name":                    vm.Name,
-			"namespace":               vm.Namespace,
-			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
-		}).Error("The VM import spec is invalid")
+		logrusEntry.Error("The VM import spec is invalid")
 		return nil, nil
 	case migration.VirtualMachineMigrationFailed:
-		logrus.WithFields(logrus.Fields{
-			"name":                    vm.Name,
-			"namespace":               vm.Namespace,
-			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
-		}).Error("The VM import has failed")
-		return nil, h.triggerCleanup(vm)
+		logrusEntry.Error("The VM import has failed")
+
+		err := h.triggerCleanup(vmiCopy)
+		if err != nil {
+			// Log the error and then drop it to prevent reconciliation loops.
+			logrusEntry.Errorf("An error occurred during cleanup: %v", err)
+		}
+
+		return nil, nil
 	}
 
 	return nil, nil
@@ -229,20 +212,20 @@ func (h *virtualMachineHandler) OnVirtualMachineRemove(_ string, vmi *migration.
 		return nil, nil
 	}
 
-	logrus.WithFields(logrus.Fields{
+	logrusEntry := logrus.WithFields(logrus.Fields{
 		"name":                    vmi.Name,
 		"namespace":               vmi.Namespace,
 		"spec.virtualMachineName": vmi.Spec.VirtualMachineName,
-	}).Info("Cleaning up temporary data ...")
+		"spec.sourceCluster.kind": vmi.Spec.SourceCluster.Kind,
+		"spec.sourceCluster.name": vmi.Spec.SourceCluster.Name,
+	})
+
+	logrusEntry.Info("Cleaning up temporary data ...")
 
 	err := h.triggerCleanup(vmi)
 	if err != nil {
 		// Just log the error and do not return it to prevent a reconciliation loop.
-		logrus.WithFields(logrus.Fields{
-			"name":                    vmi.Name,
-			"namespace":               vmi.Namespace,
-			"spec.virtualMachineName": vmi.Spec.VirtualMachineName,
-		}).Warningf("Failed to cleanup temporary data: %v", err)
+		logrusEntry.Errorf("An error occurred during cleanup: %v", err)
 	}
 
 	return nil, nil
@@ -273,10 +256,10 @@ func (h *virtualMachineHandler) preFlightChecks(vm *migration.VirtualMachineImpo
 			"name":   vm.Spec.SourceCluster.Name,
 			"status": ss.ClusterStatus(),
 		}).Warn("The source cluster is not ready yet")
-		return errors.New(errorClusterNotReady)
+		return util.ErrClusterNotReady
 	}
 
-	// verify specified storage class exists. Empty storage class means default storage class
+	// verify the specified storage class exists. Empty storage class means default storage class.
 	if vm.Spec.StorageClass != "" {
 		_, err := util.GetStorageClassByName(vm.Spec.StorageClass, h.sc)
 		if err != nil {
@@ -292,7 +275,7 @@ func (h *virtualMachineHandler) preFlightChecks(vm *migration.VirtualMachineImpo
 			sourceNetworkMap[network.SourceNetwork] = true
 			continue
 		}
-		return fmt.Errorf("source network %s appears multiple times in vm spec", network.SourceNetwork)
+		return fmt.Errorf("source network %s appears multiple times in VirtualMachineImport spec", network.SourceNetwork)
 	}
 
 	// Validate the destination network configuration.
@@ -313,7 +296,8 @@ func (h *virtualMachineHandler) preFlightChecks(vm *migration.VirtualMachineImpo
 				logrus.WithFields(logrus.Fields{
 					"name":                    vm.Name,
 					"namespace":               vm.Namespace,
-					"spec.sourcecluster.kind": vm.Spec.SourceCluster.Kind,
+					"spec.sourceCluster.kind": vm.Spec.SourceCluster.Kind,
+					"spec.sourceCluster.name": vm.Spec.SourceCluster.Name,
 				}).Errorf("Failed to get destination network '%s/%s': %v",
 					parts[0], parts[1], err)
 				return err
@@ -322,7 +306,8 @@ func (h *virtualMachineHandler) preFlightChecks(vm *migration.VirtualMachineImpo
 			logrus.WithFields(logrus.Fields{
 				"name":                    vm.Name,
 				"namespace":               vm.Namespace,
-				"spec.sourcecluster.kind": vm.Spec.SourceCluster.Kind,
+				"spec.sourceCluster.kind": vm.Spec.SourceCluster.Kind,
+				"spec.sourceCluster.name": vm.Spec.SourceCluster.Name,
 			}).Errorf("Invalid destination network '%s'", nm.DestinationNetwork)
 			return fmt.Errorf("invalid destination network '%s'", nm.DestinationNetwork)
 		}
@@ -339,7 +324,8 @@ func (h *virtualMachineHandler) preFlightChecks(vm *migration.VirtualMachineImpo
 		logrus.WithFields(logrus.Fields{
 			"name":                    vm.Name,
 			"namespace":               vm.Namespace,
-			"spec.sourcecluster.kind": vm.Spec.SourceCluster.Kind,
+			"spec.sourceCluster.kind": vm.Spec.SourceCluster.Kind,
+			"spec.sourceCluster.name": vm.Spec.SourceCluster.Name,
 		}).Info("Skipping preflight checks")
 	} else {
 		err = vmo.PreFlightChecks(vm)
@@ -537,7 +523,14 @@ func (h *virtualMachineHandler) triggerExport(vm *migration.VirtualMachineImport
 func (h *virtualMachineHandler) generateVMO(vm *migration.VirtualMachineImport) (VirtualMachineOperations, error) {
 	source, err := h.generateSource(vm)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate %q source interface: %w", vm.Spec.SourceCluster.Kind, err)
+		logrus.WithFields(logrus.Fields{
+			"name":                    vm.Name,
+			"namespace":               vm.Namespace,
+			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+			"spec.sourceCluster.kind": vm.Spec.SourceCluster.Kind,
+			"spec.sourceCluster.name": vm.Spec.SourceCluster.Name,
+		}).Errorf("Failed to generate source interface: %v", err)
+		return nil, util.ErrGenerateSourceInterface
 	}
 
 	// Secrets can be used optionally in `Source` CRs.
@@ -587,11 +580,7 @@ func (h *virtualMachineHandler) generateSource(vm *migration.VirtualMachineImpor
 		err = fmt.Errorf("source kind %q not supported", vm.Spec.SourceCluster.Kind)
 	}
 
-	if err != nil {
-		return nil, err
-	}
-
-	return si, nil
+	return si, err
 }
 
 func (h *virtualMachineHandler) createVirtualMachineImages(vm *migration.VirtualMachineImport) error {
@@ -856,14 +845,16 @@ func (h *virtualMachineHandler) tidyUpObjects(vm *migration.VirtualMachineImport
 			}
 			newRef = append(newRef, o)
 		}
+
 		vmiObj.ObjectMeta.OwnerReferences = newRef
+
 		_, err = h.vmi.Update(vmiObj)
 		if err != nil {
-			return fmt.Errorf("error removing ownerReference for vmi %s :%v", vmiObj.Name, err)
+			return fmt.Errorf("error removing ownerReference for VirtualMachineImage %s/%s: %w", vmiObj.Namespace, vmiObj.Name, err)
 		}
 	}
 
-	return h.triggerCleanup(vm)
+	return nil
 }
 
 func (h *virtualMachineHandler) triggerCleanup(vmi *migration.VirtualMachineImport) error {
