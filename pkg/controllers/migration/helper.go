@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"errors"
 	"reflect"
 	"time"
 
@@ -54,6 +55,7 @@ func (h *virtualMachineHandler) reconcileDiskImageStatus(vm *migration.VirtualMa
 		}).Error("The imported VM has no disks, being marked as invalid and will be ignored")
 
 		vm.Status.Status = migration.VirtualMachineImportInvalid
+
 		return h.importVM.UpdateStatus(vm)
 	}
 
@@ -90,6 +92,7 @@ func (h *virtualMachineHandler) reconcileVirtualMachineStatus(vm *migration.Virt
 	if err != nil {
 		return vm, err
 	}
+
 	if !ok {
 		// VM not running, requeue and check after 2mins
 		h.importVM.EnqueueAfter(vm.Namespace, vm.Name, 2*time.Minute)
@@ -97,13 +100,14 @@ func (h *virtualMachineHandler) reconcileVirtualMachineStatus(vm *migration.Virt
 	}
 
 	vm.Status.Status = migration.VirtualMachineRunning
+
 	return h.importVM.UpdateStatus(vm)
 }
 
 func (h *virtualMachineHandler) reconcilePreFlightChecks(vm *migration.VirtualMachineImport) (*migration.VirtualMachineImport, error) {
 	err := h.preFlightChecks(vm)
 	if err != nil {
-		if err.Error() == errorClusterNotReady {
+		if errors.Is(err, util.ErrClusterNotReady) {
 			h.importVM.EnqueueAfter(vm.Namespace, vm.Name, 5*time.Second)
 			return vm, err
 		}
@@ -114,11 +118,13 @@ func (h *virtualMachineHandler) reconcilePreFlightChecks(vm *migration.VirtualMa
 			"spec.sourcecluster.kind": vm.Spec.SourceCluster.Kind,
 			"spec.virtualMachineName": vm.Spec.VirtualMachineName,
 		}).Errorf("Failed to perform source cluster specific preflight checks: %v", err)
+
 		// Stop the reconciling for good as the checks failed.
 		vm.Status.Status = migration.VirtualMachineImportInvalid
 	} else {
 		vm.Status.Status = migration.VirtualMachineImportValid
 	}
+
 	return h.importVM.UpdateStatus(vm)
 }
 
@@ -145,6 +151,20 @@ func (h *virtualMachineHandler) triggerResubmit(vm *migration.VirtualMachineImpo
 	if err != nil {
 		return vm, err
 	}
+
 	vm.Status.Status = migration.SourceReady
+
 	return h.importVM.UpdateStatus(vm)
+}
+
+// abortMigrationIfNecessary checks whether the migration should be aborted based on the error that was passed.
+// If the migration should be aborted, the status of the VirtualMachineImport resource is updated accordingly;
+// otherwise the error is simply returned.
+func (h *virtualMachineHandler) abortMigrationIfNecessary(vmi *migration.VirtualMachineImport, err error) (*migration.VirtualMachineImport, error) {
+	if errors.Is(err, util.ErrGenerateSourceInterface) {
+		vmi.Status.Status = migration.VirtualMachineMigrationFailed
+		return h.importVM.UpdateStatus(vmi)
+	}
+
+	return vmi, err
 }

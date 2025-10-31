@@ -20,7 +20,7 @@ func Test_NewServer(t *testing.T) {
 	assert.NoError(err, "expected no error during creation of tmp dir")
 	go func() {
 		err = newServer(ctx, TempDir())
-		assert.Contains(err.Error(), "http: Server closed", "error occurred during shutdown") //only expected error is context canceled
+		assert.Contains(err.Error(), "http: Server closed", "error occurred during shutdown") // the only expected error is context canceled
 	}()
 	time.Sleep(1 * time.Second)
 	assert.DirExists(TempDir(), "expected temp dir to exist")

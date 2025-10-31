@@ -28,6 +28,9 @@ var _ = Describe("perform valid dns names", func() {
 		}
 
 		vcsim = &migration.VmwareSource{
+			TypeMeta: metav1.TypeMeta{
+				APIVersion: "migration.harvesterhci.io/v1beta1",
+			},
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "local-vm-validation",
 				Namespace: "default",
