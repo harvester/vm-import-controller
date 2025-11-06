@@ -362,7 +362,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			"volume.status":           volume.Status,
 			"retryCount":              c.options.UploadImageRetryCount,
 			"retryDelay":              c.options.UploadImageRetryDelay,
-		}).Info("Waiting for volume to be available")
+		}).Info("Waiting for volume to be available ...")
 
 		ctxWithTimeout2, cancel2 := context.WithTimeout(c.ctx, pollingTimeout)
 		defer cancel2()
@@ -390,6 +390,15 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 		// wait for image to be ready
 		isImageActive := false
 		for i := 0; i < c.options.UploadImageRetryCount; i++ {
+			logrus.WithFields(logrus.Fields{
+				"name":                    vm.Name,
+				"namespace":               vm.Namespace,
+				"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+				"retryCount":              c.options.UploadImageRetryCount,
+				"retryDelay":              c.options.UploadImageRetryDelay,
+				"retryIndex":              i,
+			}).Infof("Waiting for image status to be %q ...", images.ImageStatusActive)
+
 			imgObj, err := images.Get(c.ctx, c.imageClient, volumeImage.ImageID).Extract()
 			if err != nil {
 				logrus.WithFields(logrus.Fields{
@@ -397,29 +406,26 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 					"namespace":               vm.Namespace,
 					"spec.virtualMachineName": vm.Spec.VirtualMachineName,
 					"image.id":                volumeImage.ImageID,
-				}).Errorf("Failed to get image: %v", err)
+				}).Errorf("Failed to get image. Retrying: %v", err)
 			} else {
+				logrus.WithFields(logrus.Fields{
+					"name":                    vm.Name,
+					"namespace":               vm.Namespace,
+					"spec.virtualMachineName": vm.Spec.VirtualMachineName,
+					"image.id":                imgObj.ID,
+					"image.status":            imgObj.Status,
+				}).Info("Image has been uploaded. Checking status ...")
+
 				if imgObj.Status == images.ImageStatusActive {
 					isImageActive = true
 					break
 				}
 			}
 
-			logrus.WithFields(logrus.Fields{
-				"name":                    vm.Name,
-				"namespace":               vm.Namespace,
-				"spec.virtualMachineName": vm.Spec.VirtualMachineName,
-				"image.id":                imgObj.ID,
-				"image.status":            imgObj.Status,
-				"retryCount":              c.options.UploadImageRetryCount,
-				"retryDelay":              c.options.UploadImageRetryDelay,
-				"retryIndex":              i,
-			}).Infof("Waiting for image status to be '%s'", images.ImageStatusActive)
-
 			time.Sleep(time.Duration(c.options.UploadImageRetryDelay) * time.Second)
 		}
 		if !isImageActive {
-			return fmt.Errorf("timeout waiting for status '%s' of image %s", images.ImageStatusActive, volumeImage.ImageID)
+			return fmt.Errorf("timeout waiting for status %q of image %s", images.ImageStatusActive, volumeImage.ImageID)
 		}
 
 		logrus.WithFields(logrus.Fields{
