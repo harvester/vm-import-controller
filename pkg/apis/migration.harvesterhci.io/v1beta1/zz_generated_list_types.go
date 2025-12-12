@@ -26,6 +26,23 @@ import (
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
+// KVMSourceList is a list of KVMSource resources
+type KVMSourceList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata"`
+
+	Items []KVMSource `json:"items"`
+}
+
+func NewKVMSource(namespace, name string, obj KVMSource) *KVMSource {
+	obj.APIVersion, obj.Kind = SchemeGroupVersion.WithKind("KVMSource").ToAPIVersionAndKind()
+	obj.Name = name
+	obj.Namespace = namespace
+	return &obj
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
 // OpenstackSourceList is a list of OpenstackSource resources
 type OpenstackSourceList struct {
 	metav1.TypeMeta `json:",inline"`
