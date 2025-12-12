@@ -95,10 +95,13 @@ func Register(ctx context.Context, restConfig *rest.Config) error {
 	}
 
 	sc.RegisterVmwareController(ctx, migrationFactory.Migration().V1beta1().VmwareSource(), coreFactory.Core().V1().Secret())
+	sc.RegisterKVMController(ctx, migrationFactory.Migration().V1beta1().KVMSource(), coreFactory.Core().V1().Secret())
 	sc.RegisterOvaController(ctx, migrationFactory.Migration().V1beta1().OvaSource(), coreFactory.Core().V1().Secret())
 	sc.RegisterOpenstackController(ctx, migrationFactory.Migration().V1beta1().OpenstackSource(), coreFactory.Core().V1().Secret())
-	sc.RegisterVMImportController(ctx, migrationFactory.Migration().V1beta1().VmwareSource(), migrationFactory.Migration().V1beta1().OpenstackSource(),
-		migrationFactory.Migration().V1beta1().OvaSource(), coreFactory.Core().V1().Secret(), migrationFactory.Migration().V1beta1().VirtualMachineImport(),
+	sc.RegisterVMImportController(ctx,
+		migrationFactory.Migration().V1beta1().VmwareSource(), migrationFactory.Migration().V1beta1().OpenstackSource(),
+		migrationFactory.Migration().V1beta1().OvaSource(), migrationFactory.Migration().V1beta1().KVMSource(),
+		coreFactory.Core().V1().Secret(), migrationFactory.Migration().V1beta1().VirtualMachineImport(),
 		harvesterFactory.Harvesterhci().V1beta1().VirtualMachineImage(), kubevirtFactory.Kubevirt().V1().VirtualMachine(),
 		coreFactory.Core().V1().PersistentVolumeClaim(), scCache, cniFactory.K8s().V1().NetworkAttachmentDefinition().Cache())
 
