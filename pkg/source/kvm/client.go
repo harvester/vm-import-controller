@@ -69,10 +69,7 @@ func NewClient(ctx context.Context, libvirtURI string, secret *corev1.Secret) (*
 		User: user,
 		Auth: authMethods,
 		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
-			// InsecureSkipTLSVerify logic handled by caller or ignored for now as we don't have known_hosts management easily
-			// For this POC/implementation, we accept all keys if InsecureSkipTLSVerify is true (passed down? No, we don't have it here yet)
-			// The CRD has the flag.
-			return nil // TODO: Implement strict host checking if needed
+			return nil
 		},
 		Timeout: 10 * time.Second,
 	}

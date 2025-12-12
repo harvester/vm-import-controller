@@ -10,6 +10,7 @@ import (
 
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +kubebuilder:subresource:status
 
 type KVMSource struct {
 	metav1.TypeMeta   `json:",inline"`
@@ -19,9 +20,8 @@ type KVMSource struct {
 }
 
 type KVMSourceSpec struct {
-	LibvirtURI            string                 `json:"libvirtURI"`
-	Credentials           corev1.SecretReference `json:"credentials"`
-	InsecureSkipTLSVerify bool                   `json:"insecureSkipTLSVerify,omitempty"`
+	LibvirtURI  string                 `json:"libvirtURI"`
+	Credentials corev1.SecretReference `json:"credentials"`
 }
 
 type KVMSourceStatus struct {
@@ -57,12 +57,6 @@ func (s *KVMSource) GetConnectionInfo() (string, string) {
 	return s.Spec.LibvirtURI, ""
 }
 
-type KVMSourceOptions struct {
-	InsecureSkipTLSVerify bool
-}
-
 func (s *KVMSource) GetOptions() interface{} {
-	return KVMSourceOptions{
-		InsecureSkipTLSVerify: s.Spec.InsecureSkipTLSVerify,
-	}
+	return nil
 }
