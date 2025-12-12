@@ -31,6 +31,7 @@ func init() {
 }
 
 type Interface interface {
+	KVMSource() KVMSourceController
 	OpenstackSource() OpenstackSourceController
 	OvaSource() OvaSourceController
 	VirtualMachineImport() VirtualMachineImportController
@@ -45,6 +46,10 @@ func New(controllerFactory controller.SharedControllerFactory) Interface {
 
 type version struct {
 	controllerFactory controller.SharedControllerFactory
+}
+
+func (v *version) KVMSource() KVMSourceController {
+	return generic.NewController[*v1beta1.KVMSource, *v1beta1.KVMSourceList](schema.GroupVersionKind{Group: "migration.harvesterhci.io", Version: "v1beta1", Kind: "KVMSource"}, "kvmsources", true, v.controllerFactory)
 }
 
 func (v *version) OpenstackSource() OpenstackSourceController {
