@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"syscall"
 
 	"github.com/sirupsen/logrus"
 )
@@ -20,14 +19,15 @@ func ConvertVMDKtoRAW(source, target string) error {
 	return runCommand(defaultCommand, args...)
 }
 
-func ConvertFromStdin(source io.Reader, target, format string) error {
+func ConvertFromPath(source, target, format string) error {
 	logrus.WithFields(logrus.Fields{
+		"source": source,
 		"target": target,
 		"format": format,
-	}).Info("Converting image from stdin to RAW ...")
-	// qemu-img convert -f <format> -O raw /dev/stdin <target>
-	args := []string{"convert", "-f", format, "-O", "raw", "/dev/stdin", target}
-	return runCommandWithStdin(defaultCommand, source, args...)
+	}).Info("Converting image from path to RAW ...")
+	// qemu-img convert -f <format> -O raw <source> <target>
+	args := []string{"convert", "-f", format, "-O", "raw", source, target}
+	return runCommand(defaultCommand, args...)
 }
 
 func createVMDK(path string, size string) error {
@@ -36,17 +36,8 @@ func createVMDK(path string, size string) error {
 }
 
 func runCommand(command string, args ...string) error {
-	return runCommandWithStdin(command, nil, args...)
-}
-
-func runCommandWithStdin(command string, stdin io.Reader, args ...string) error {
 	cmd := exec.Command(command, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{}
-	if stdin != nil {
-		cmd.Stdin = stdin
-	}
 	stderr, err := cmd.StderrPipe()
-
 	if err != nil {
 		return fmt.Errorf("error creating stderr pipe: %v", err)
 	}
