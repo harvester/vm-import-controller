@@ -2,7 +2,6 @@ package integration
 
 import (
 	"fmt"
-	"strings"
 
 	harvesterv1beta1 "github.com/harvester/harvester/pkg/apis/harvesterhci.io/v1beta1"
 	v1 "k8s.io/api/core/v1"
@@ -112,9 +111,8 @@ var _ = Describe("test kvm export/import integration", func() {
 						return fmt.Errorf("waiting for VMI to be populated")
 					}
 					pvc := &v1.PersistentVolumeClaim{}
-					pvcName := strings.ToLower(strings.Split(d.Name, ".img")[0])
 					err := k8sClient.Get(ctx, types.NamespacedName{Namespace: setup.KVMVMNamespacedName.Namespace,
-						Name: pvcName}, pvc)
+						Name: d.VirtualMachineImage}, pvc)
 					if err != nil {
 						return err
 					}

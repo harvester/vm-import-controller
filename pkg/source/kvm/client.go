@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pkg/sftp"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
 	corev1 "k8s.io/api/core/v1"
@@ -221,13 +223,11 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 		return err
 	}
 
-	tmpPath, err := os.MkdirTemp("/tmp", fmt.Sprintf("%s-%s-", vm.Name, vm.Namespace))
+	sftpClient, err := sftp.NewClient(c.sshClient)
 	if err != nil {
-		return fmt.Errorf("error creating tmp dir: %v", err)
+		return fmt.Errorf("failed to create sftp client: %v", err)
 	}
-	// Note: We don't defer removeAll here because we might want to keep it if something fails?
-	// Actually, we should clean up. But the VMware client does defer removeAll.
-	defer os.RemoveAll(tmpPath)
+	defer sftpClient.Close()
 
 	for i, disk := range dom.Devices.Disks {
 		if disk.Device != "disk" {
@@ -237,47 +237,43 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			continue
 		}
 
-		// Local destination path
+		// Create a temporary file to store the downloaded disk
+		tmpFile, err := os.CreateTemp("", fmt.Sprintf("%s-disk-%d-", vm.Name, i))
+		if err != nil {
+			return fmt.Errorf("failed to create temporary file for download: %v", err)
+		}
+		defer os.Remove(tmpFile.Name())
+
+		logrus.Infof("Downloading disk %s to %s", disk.Source.File, tmpFile.Name())
+
+		// Open the remote file
+		remoteFile, err := sftpClient.Open(disk.Source.File)
+		if err != nil {
+			return fmt.Errorf("failed to open remote file %s: %v", disk.Source.File, err)
+		}
+		defer remoteFile.Close()
+
+		// Copy the remote file to the temporary local file
+		if _, err := io.Copy(tmpFile, remoteFile); err != nil {
+			return fmt.Errorf("failed to download remote file: %v", err)
+		}
+		tmpFile.Close() // Close the file so qemu-img can access it
+
+		// Local destination path for the converted RAW image
 		rawDiskName := fmt.Sprintf("%s-disk-%d.img", vm.Name, i)
 		destFile := filepath.Join(server.TempDir(), rawDiskName)
 
-		logrus.Infof("Exporting disk %s to %s", disk.Source.File, destFile)
+		logrus.Infof("Converting downloaded disk %s to %s", tmpFile.Name(), destFile)
 
-		// Use ssh cat | qemu-img convert
-		// We need a new session for the pipe
-		session, err := c.sshClient.NewSession()
-		if err != nil {
-			return fmt.Errorf("failed to create ssh session: %v", err)
-		}
-
-		stdout, err := session.StdoutPipe()
-		if err != nil {
-			session.Close()
-			return fmt.Errorf("failed to get stdout pipe: %v", err)
-		}
-
-		if err := session.Start(fmt.Sprintf("cat %s", disk.Source.File)); err != nil {
-			session.Close()
-			return fmt.Errorf("failed to start cat command: %v", err)
-		}
-
-		// Run qemu-img convert reading from stdin
-		// XML has driver type.
+		// Use qemu-img convert on the local, downloaded file
 		srcFormat := disk.Driver.Type
 		if srcFormat == "" {
 			srcFormat = "qcow2" // Default assumption
 		}
 
-		// Use shared qemu package
-		if err := qemu.ConvertFromStdin(stdout, destFile, srcFormat); err != nil {
-			session.Close()
+		if err := qemu.ConvertFromPath(tmpFile.Name(), destFile, srcFormat); err != nil {
 			return fmt.Errorf("qemu convert failed: %v", err)
 		}
-
-		if err := session.Wait(); err != nil {
-			return fmt.Errorf("ssh cat command failed: %v", err)
-		}
-		session.Close()
 
 		// Update status
 		busType := kubevirt.DiskBusVirtio
@@ -299,7 +295,15 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 }
 
 func (c *Client) ShutdownGuest(vm *migration.VirtualMachineImport) error {
-	_, err := c.runCommand(fmt.Sprintf("virsh shutdown %s", vm.Spec.VirtualMachineName))
+	powerOff, err := c.IsPoweredOff(vm)
+	if err != nil {
+		return err
+	}
+	if powerOff {
+		logrus.Infof("VM %s is already powered off, skipping shutdown.", vm.Spec.VirtualMachineName)
+		return nil
+	}
+	_, err = c.runCommand(fmt.Sprintf("virsh shutdown %s", vm.Spec.VirtualMachineName))
 	return err
 }
 
