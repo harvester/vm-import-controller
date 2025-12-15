@@ -24,6 +24,10 @@ func List() []crd.CRD {
 			return c.
 				WithColumn("Status", ".status.status")
 		}),
+		newCRD("migration.harvesterhci.io", &migration.KVMSource{}, func(c crd.CRD) crd.CRD {
+			return c.
+				WithColumn("Status", ".status.status")
+		}),
 		newCRD("migration.harvesterhci.io", &migration.VirtualMachineImport{}, func(c crd.CRD) crd.CRD {
 			return c.
 				WithColumn("Status", ".status.importStatus")

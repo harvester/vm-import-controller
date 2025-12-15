@@ -10,7 +10,6 @@ import (
 
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// +kubebuilder:subresource:status
 
 type KVMSource struct {
 	metav1.TypeMeta   `json:",inline"`
