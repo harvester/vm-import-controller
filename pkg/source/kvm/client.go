@@ -3,7 +3,6 @@ package kvm
 import (
 	"bytes"
 	"context"
-	"encoding/xml"
 	"fmt"
 	"io"
 	"net"
@@ -19,6 +18,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubevirt "kubevirt.io/api/core/v1"
+	libvirtxml "libvirt.org/go/libvirtxml"
 
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/qemu"
@@ -128,85 +128,14 @@ func (c *Client) runCommand(cmd string) (string, error) {
 	return stdout.String(), nil
 }
 
-// Domain XML structs
-type Domain struct {
-	Name    string  `xml:"name"`
-	UUID    string  `xml:"uuid"`
-	Memory  int     `xml:"memory"`
-	VCPU    int     `xml:"vcpu"`
-	Devices Devices `xml:"devices"`
-	OS      OS      `xml:"os"`
-}
-
-type OS struct {
-	Type    OSType    `xml:"type"`
-	BootDev []BootDev `xml:"boot>dev"`
-}
-
-type OSType struct {
-	Arch    string `xml:"arch,attr"`
-	Machine string `xml:"machine,attr"`
-	Value   string `xml:",chardata"`
-}
-
-type BootDev struct {
-	Dev string `xml:"dev,attr"`
-}
-
-type Devices struct {
-	Disks      []Disk      `xml:"disk"`
-	Interfaces []Interface `xml:"interface"`
-}
-
-type Disk struct {
-	Device string `xml:"device,attr"`
-	Driver Driver `xml:"driver"`
-	Source Source `xml:"source"`
-	Target Target `xml:"target"`
-}
-
-type Driver struct {
-	Name string `xml:"name,attr"`
-	Type string `xml:"type,attr"`
-}
-
-type Source struct {
-	File string `xml:"file,attr"`
-}
-
-type Target struct {
-	Dev string `xml:"dev,attr"`
-	Bus string `xml:"bus,attr"`
-}
-
-type Interface struct {
-	Type   string        `xml:"type,attr"`
-	Mac    Mac           `xml:"mac"`
-	Model  Model         `xml:"model"`
-	Source NetworkSource `xml:"source"`
-}
-
-type Mac struct {
-	Address string `xml:"address,attr"`
-}
-
-type Model struct {
-	Type string `xml:"type,attr"`
-}
-
-type NetworkSource struct {
-	Network string `xml:"network,attr"`
-	Bridge  string `xml:"bridge,attr"`
-}
-
-func (c *Client) getDomainXML(vmName string) (*Domain, error) {
+func (c *Client) getDomainXML(vmName string) (*libvirtxml.Domain, error) {
 	out, err := c.runCommand(fmt.Sprintf("virsh dumpxml %s", vmName))
 	if err != nil {
 		return nil, err
 	}
 
-	var dom Domain
-	if err := xml.Unmarshal([]byte(out), &dom); err != nil {
+	var dom libvirtxml.Domain
+	if err := dom.Unmarshal(out); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal domain xml: %v", err)
 	}
 	return &dom, nil
@@ -229,13 +158,18 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 	}
 	defer sftpClient.Close()
 
+	if dom.Devices == nil {
+		return fmt.Errorf("no devices found in domain XML")
+	}
+
 	for i, disk := range dom.Devices.Disks {
 		if disk.Device != "disk" {
 			continue
 		}
-		if disk.Source.File == "" {
+		if disk.Source == nil || disk.Source.File == nil {
 			continue
 		}
+		sourceFile := disk.Source.File.File
 
 		// Create a temporary file to store the downloaded disk
 		tmpFile, err := os.CreateTemp("", fmt.Sprintf("%s-disk-%d-", vm.Name, i))
@@ -244,12 +178,12 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 		}
 		defer os.Remove(tmpFile.Name())
 
-		logrus.Infof("Downloading disk %s to %s", disk.Source.File, tmpFile.Name())
+		logrus.Infof("Downloading disk %s to %s", sourceFile, tmpFile.Name())
 
 		// Open the remote file
-		remoteFile, err := sftpClient.Open(disk.Source.File)
+		remoteFile, err := sftpClient.Open(sourceFile)
 		if err != nil {
-			return fmt.Errorf("failed to open remote file %s: %v", disk.Source.File, err)
+			return fmt.Errorf("failed to open remote file %s: %v", sourceFile, err)
 		}
 		defer remoteFile.Close()
 
@@ -266,9 +200,9 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 		logrus.Infof("Converting downloaded disk %s to %s", tmpFile.Name(), destFile)
 
 		// Use qemu-img convert on the local, downloaded file
-		srcFormat := disk.Driver.Type
-		if srcFormat == "" {
-			srcFormat = "qcow2" // Default assumption
+		srcFormat := "qcow2" // Default assumption
+		if disk.Driver != nil && disk.Driver.Type != "" {
+			srcFormat = disk.Driver.Type
 		}
 
 		if err := qemu.ConvertFromPath(tmpFile.Name(), destFile, srcFormat); err != nil {
@@ -277,15 +211,23 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 
 		// Update status
 		busType := kubevirt.DiskBusVirtio
-		if disk.Target.Bus == "sata" || disk.Target.Bus == "ide" {
-			busType = kubevirt.DiskBusSATA
-		} else if disk.Target.Bus == "scsi" {
-			busType = kubevirt.DiskBusSCSI
+		if disk.Target != nil {
+			if disk.Target.Bus == "sata" || disk.Target.Bus == "ide" {
+				busType = kubevirt.DiskBusSATA
+			} else if disk.Target.Bus == "scsi" {
+				busType = kubevirt.DiskBusSCSI
+			}
+		}
+
+		// Get the size of the converted image
+		destFileInfo, err := os.Stat(destFile)
+		if err != nil {
+			return fmt.Errorf("failed to get stats for converted disk: %v", err)
 		}
 
 		vm.Status.DiskImportStatus = append(vm.Status.DiskImportStatus, migration.DiskInfo{
 			Name:          rawDiskName,
-			DiskSize:      0, // We could get this from qemu-img info on the result
+			DiskSize:      destFileInfo.Size(),
 			BusType:       busType,
 			DiskLocalPath: server.TempDir(),
 		})
@@ -340,31 +282,44 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 	vmSpec := source.NewVirtualMachineSpec(source.VirtualMachineSpecConfig{
 		Name: vm.Status.ImportedVirtualMachineName,
 		Hardware: source.Hardware{
-			NumCPU:   uint32(dom.VCPU),
-			MemoryMB: int64(dom.Memory / 1024), // XML memory is usually in KiB
+			NumCPU:   uint32(dom.VCPU.Value),
+			MemoryMB: int64(dom.Memory.Value / 1024), // XML memory is usually in KiB
 		},
 	})
 
 	// Network mapping
 	var networkInfos []source.NetworkInfo
-	for _, iface := range dom.Devices.Interfaces {
-		model := migration.NetworkInterfaceModelVirtio
-		if iface.Model.Type == "e1000" {
-			model = migration.NetworkInterfaceModelE1000
-		} else if iface.Model.Type == "e1000e" {
-			model = migration.NetworkInterfaceModelE1000e
-		}
+	if dom.Devices != nil {
+		for _, iface := range dom.Devices.Interfaces {
+			model := migration.NetworkInterfaceModelVirtio
+			if iface.Model != nil {
+				if iface.Model.Type == "e1000" {
+					model = migration.NetworkInterfaceModelE1000
+				} else if iface.Model.Type == "e1000e" {
+					model = migration.NetworkInterfaceModelE1000e
+				}
+			}
 
-		networkName := iface.Source.Network
-		if networkName == "" {
-			networkName = iface.Source.Bridge
-		}
+			networkName := ""
+			if iface.Source != nil {
+				if iface.Source.Network != nil {
+					networkName = iface.Source.Network.Network
+				} else if iface.Source.Bridge != nil {
+					networkName = iface.Source.Bridge.Bridge
+				}
+			}
 
-		networkInfos = append(networkInfos, source.NetworkInfo{
-			NetworkName: networkName,
-			MAC:         iface.Mac.Address,
-			Model:       model,
-		})
+			macAddr := ""
+			if iface.MAC != nil {
+				macAddr = iface.MAC.Address
+			}
+
+			networkInfos = append(networkInfos, source.NetworkInfo{
+				NetworkName: networkName,
+				MAC:         macAddr,
+				Model:       model,
+			})
+		}
 	}
 
 	mappedNetwork := source.MapNetworks(networkInfos, vm.Spec.Mapping)
