@@ -2,11 +2,11 @@ package kvm
 
 import (
 	"context"
-	"encoding/xml"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
+	libvirtxml "libvirt.org/go/libvirtxml"
 )
 
 func TestParseDomainXML(t *testing.T) {
@@ -35,20 +35,20 @@ func TestParseDomainXML(t *testing.T) {
 </domain>
 `
 
-	var dom Domain
-	err := xml.Unmarshal([]byte(xmlData), &dom)
+	var dom libvirtxml.Domain
+	err := dom.Unmarshal(xmlData)
 	assert.NoError(t, err)
 
 	assert.Equal(t, "test-vm", dom.Name)
 	assert.Equal(t, "a75aca4b-42f6-4447-9262-4b9562d3d95c", dom.UUID)
-	assert.Equal(t, 4194304, dom.Memory)
-	assert.Equal(t, 2, dom.VCPU)
+	assert.Equal(t, uint(4194304), dom.Memory.Value)
+	assert.Equal(t, 2, dom.VCPU.Value)
 	assert.Len(t, dom.Devices.Disks, 1)
-	assert.Equal(t, "/var/lib/libvirt/images/test-vm.qcow2", dom.Devices.Disks[0].Source.File)
+	assert.Equal(t, "/var/lib/libvirt/images/test-vm.qcow2", dom.Devices.Disks[0].Source.File.File)
 	assert.Equal(t, "qcow2", dom.Devices.Disks[0].Driver.Type)
 	assert.Len(t, dom.Devices.Interfaces, 1)
-	assert.Equal(t, "52:54:00:6b:3c:58", dom.Devices.Interfaces[0].Mac.Address)
-	assert.Equal(t, "default", dom.Devices.Interfaces[0].Source.Network)
+	assert.Equal(t, "52:54:00:6b:3c:58", dom.Devices.Interfaces[0].MAC.Address)
+	assert.Equal(t, "default", dom.Devices.Interfaces[0].Source.Network.Network)
 }
 
 func TestNewClient(t *testing.T) {
@@ -60,9 +60,9 @@ func TestNewClient(t *testing.T) {
 		},
 	}
 
-	// This should fail to dial but pass config validation
+	// Test with a dummy URI. Since we are using standard ssh.Dial,
+	// checking valid URI parsing is still useful, even if Dial fails.
 	_, err := NewClient(ctx, "qemu+ssh://user@localhost/system", secret)
-	// We expect an error because we can't actually connect, but we want to ensure it tries
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to dial ssh")
 }

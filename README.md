@@ -170,7 +170,7 @@ $ kubectl get virtualmachineimport.migration
 NAME                    STATUS
 alpine-export-test      virtualMachineRunning
 openstack-cirros-test   virtualMachineRunning
-
+kvm-export-test         virtualMachineRunning
 ```
 
 Similarly, users can define a VirtualMachineImport for Openstack source as well:

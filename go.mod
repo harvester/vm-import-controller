@@ -28,6 +28,7 @@ require (
 	k8s.io/utils v0.0.0-20250604170112-4c0f3b243397
 	kubevirt.io/api v1.5.0
 	kubevirt.io/kubevirt v1.5.0
+	libvirt.org/go/libvirtxml v1.11010.0
 	sigs.k8s.io/cluster-api v1.9.4
 	sigs.k8s.io/controller-runtime v0.20.2
 )
