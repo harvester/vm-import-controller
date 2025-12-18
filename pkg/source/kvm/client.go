@@ -287,11 +287,17 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		},
 	}
 
+	var cpuModel string
+	if dom.CPU != nil && dom.CPU.Model != nil {
+		cpuModel = dom.CPU.Model.Value
+	}
+
 	vmSpec := source.NewVirtualMachineSpec(source.VirtualMachineSpecConfig{
 		Name: vm.Status.ImportedVirtualMachineName,
 		Hardware: source.Hardware{
-			NumCPU:   uint32(dom.VCPU.Value),
-			MemoryMB: int64(dom.Memory.Value / 1024), // XML memory is usually in KiB
+			NumCPU:      uint32(dom.VCPU.Value),
+			MemoryMB:    int64(dom.Memory.Value / 1024), // XML memory is usually in KiB
+			CPUModel:    cpuModel,
 		},
 	})
 

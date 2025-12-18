@@ -31,10 +31,11 @@ type Hardware struct {
 	NumCPU            uint32 // The type is adapted to KubeVirt CPU
 	NumCoresPerSocket uint32 // The type is adapted to KubeVirt CPU
 	MemoryMB          int64
+	CPUModel          string
 }
 
-func NewHardware(numCPU, numCoresPerSocket uint32, memoryMB int64) *Hardware {
-	return &Hardware{NumCPU: numCPU, NumCoresPerSocket: numCoresPerSocket, MemoryMB: memoryMB}
+func NewHardware(numCPU, numCoresPerSocket uint32, memoryMB int64, cpuModel string) *Hardware {
+	return &Hardware{NumCPU: numCPU, NumCoresPerSocket: numCoresPerSocket, MemoryMB: memoryMB, CPUModel: cpuModel}
 }
 
 type VirtualMachineSpecConfig struct {
@@ -58,6 +59,7 @@ func NewVirtualMachineSpec(cfg VirtualMachineSpecConfig) *kubevirtv1.VirtualMach
 						Cores:   cfg.Hardware.NumCPU,
 						Sockets: cfg.Hardware.NumCoresPerSocket,
 						Threads: 1,
+						Model:   cfg.Hardware.CPUModel,
 					},
 					Memory: &kubevirtv1.Memory{
 						Guest: ptr.To(resource.MustParse(fmt.Sprintf("%dM", cfg.Hardware.MemoryMB))),
