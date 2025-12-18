@@ -166,10 +166,18 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 		if disk.Device != "disk" {
 			continue
 		}
-		if disk.Source == nil || disk.Source.File == nil {
+		var sourceFile string
+		if disk.Source != nil {
+			if disk.Source.File != nil {
+				sourceFile = disk.Source.File.File
+			} else if disk.Source.Block != nil {
+				sourceFile = disk.Source.Block.Dev
+			}
+		}
+
+		if sourceFile == "" {
 			continue
 		}
-		sourceFile := disk.Source.File.File
 
 		// Create a temporary file to store the downloaded disk
 		tmpFile, err := os.CreateTemp("", fmt.Sprintf("%s-disk-%d-", vm.Name, i))
