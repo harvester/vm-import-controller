@@ -292,6 +292,15 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		cpuModel = dom.CPU.Model.Value
 	}
 
+	// Firmware settings
+	fw := source.NewFirmware(false, false, false)
+	if dom.OS != nil && dom.OS.Loader != nil {
+		fw.UEFI = true // Presence of a loader usually indicates UEFI
+	}
+	if dom.Devices != nil && len(dom.Devices.TPMs) > 0 {
+		fw.TPM = true
+	}
+
 	vmSpec := source.NewVirtualMachineSpec(source.VirtualMachineSpecConfig{
 		Name: vm.Status.ImportedVirtualMachineName,
 		Hardware: source.Hardware{
@@ -338,6 +347,9 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 
 	mappedNetwork := source.MapNetworks(networkInfos, vm.Spec.Mapping)
 	networkConfig, interfaceConfig := source.GenerateNetworkInterfaceConfigs(mappedNetwork, vm.GetDefaultNetworkInterfaceModel())
+
+	// Apply firmware settings
+	source.ApplyFirmwareSettings(vmSpec, fw)
 
 	vmSpec.Template.Spec.Networks = networkConfig
 	vmSpec.Template.Spec.Domain.Devices.Interfaces = interfaceConfig
