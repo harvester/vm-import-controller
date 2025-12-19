@@ -142,7 +142,7 @@ func (c *Client) getDomainXML(vmName string) (*libvirtxml.Domain, error) {
 }
 
 func (c *Client) SanitizeVirtualMachineImport(vm *migration.VirtualMachineImport) error {
-	vm.Status.ImportedVirtualMachineName = strings.ToLower(vm.Spec.VirtualMachineName)
+	vm.Status.ImportedVirtualMachineName = strings.Split(strings.ToLower(vm.Spec.VirtualMachineName), ".")[0]
 	return nil
 }
 
@@ -295,9 +295,9 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 	vmSpec := source.NewVirtualMachineSpec(source.VirtualMachineSpecConfig{
 		Name: vm.Status.ImportedVirtualMachineName,
 		Hardware: source.Hardware{
-			NumCPU:      uint32(dom.VCPU.Value),
-			MemoryMB:    int64(dom.Memory.Value / 1024), // XML memory is usually in KiB
-			CPUModel:    cpuModel,
+			NumCPU:   uint32(dom.VCPU.Value),
+			MemoryMB: int64(dom.Memory.Value / 1024), // XML memory is usually in KiB
+			CPUModel: cpuModel,
 		},
 	})
 
