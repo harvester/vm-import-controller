@@ -698,9 +698,6 @@ func (h *virtualMachineHandler) createVirtualMachine(vm *migration.VirtualMachin
 	runVM.Spec.Template.Spec.Volumes = vmVols
 	runVM.Spec.Template.Spec.Domain.Devices.Disks = disks
 
-	evictionStrategy := kubevirt.EvictionStrategyLiveMigrateIfPossible
-	runVM.Spec.Template.Spec.EvictionStrategy = &evictionStrategy
-
 	// Apply a label to the `VirtualMachine` object to make the newly
 	// created VM identifiable.
 	metav1.SetMetaDataLabel(&runVM.ObjectMeta, labelImported, "true")
