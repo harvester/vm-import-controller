@@ -6,6 +6,7 @@ import (
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
+	"k8s.io/utils/ptr"
 	"kubevirt.io/kubevirt/pkg/virt-operator/resource/generate/components"
 
 	harvesterv1 "github.com/harvester/harvester/pkg/apis/harvesterhci.io/v1beta1"
@@ -82,10 +83,9 @@ func generateKubeVirtCRD() ([]*extv1.CustomResourceDefinition, error) {
 
 // generateK8sCniCncfIoCRD will generate k8s.cni.cncf.io CRDs
 func generateK8sCniCncfIoCRD() ([]*extv1.CustomResourceDefinition, error) {
-	var results []*extv1.CustomResourceDefinition
-	results = append(results,
+	return []*extv1.CustomResourceDefinition{
 		// See https://github.com/k8snetworkplumbingwg/network-attachment-definition-client/blob/v1.3.0/artifacts/networks-crd.yaml
-		&extv1.CustomResourceDefinition{
+		ptr.To(extv1.CustomResourceDefinition{
 			TypeMeta: metav1.TypeMeta{
 				APIVersion: extv1.SchemeGroupVersion.String(),
 				Kind:       "CustomResourceDefinition",
@@ -125,6 +125,6 @@ func generateK8sCniCncfIoCRD() ([]*extv1.CustomResourceDefinition, error) {
 					},
 				},
 			},
-		})
-	return results, nil
+		}),
+	}, nil
 }
