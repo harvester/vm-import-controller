@@ -44,7 +44,7 @@ type VirtualMachineSpecConfig struct {
 
 func NewVirtualMachineSpec(cfg VirtualMachineSpecConfig) *kubevirtv1.VirtualMachineSpec {
 	return &kubevirtv1.VirtualMachineSpec{
-		RunStrategy: &[]kubevirtv1.VirtualMachineRunStrategy{kubevirtv1.RunStrategyRerunOnFailure}[0],
+		RunStrategy: ptr.To(kubevirtv1.RunStrategyRerunOnFailure),
 		Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
@@ -52,6 +52,7 @@ func NewVirtualMachineSpec(cfg VirtualMachineSpecConfig) *kubevirtv1.VirtualMach
 				},
 			},
 			Spec: kubevirtv1.VirtualMachineInstanceSpec{
+				EvictionStrategy: ptr.To(kubevirtv1.EvictionStrategyLiveMigrateIfPossible),
 				Domain: kubevirtv1.DomainSpec{
 					CPU: &kubevirtv1.CPU{
 						Cores:   cfg.Hardware.NumCPU,
@@ -59,7 +60,7 @@ func NewVirtualMachineSpec(cfg VirtualMachineSpecConfig) *kubevirtv1.VirtualMach
 						Threads: 1,
 					},
 					Memory: &kubevirtv1.Memory{
-						Guest: &[]resource.Quantity{resource.MustParse(fmt.Sprintf("%dM", cfg.Hardware.MemoryMB))}[0],
+						Guest: ptr.To(resource.MustParse(fmt.Sprintf("%dM", cfg.Hardware.MemoryMB))),
 					},
 					Resources: kubevirtv1.ResourceRequirements{
 						Limits: corev1.ResourceList{

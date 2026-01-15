@@ -9,6 +9,8 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
+	"k8s.io/utils/ptr"
+	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/server"
@@ -144,6 +146,8 @@ func Test_GenerateVirtualMachine(t *testing.T) {
 	}
 	newVM, err := c.GenerateVirtualMachine(vm)
 	assert.NoError(err, "expected no error during GenerateVirtualMachine")
+	assert.Equal(newVM.Spec.RunStrategy, ptr.To(kubevirtv1.RunStrategyRerunOnFailure))
+	assert.Equal(newVM.Spec.Template.Spec.EvictionStrategy, ptr.To(kubevirtv1.EvictionStrategyLiveMigrateIfPossible))
 	assert.NotEmpty(newVM.Spec.Template.Spec.Domain.CPU, "expected CPU's to not be empty")
 	assert.NotEmpty(newVM.Spec.Template.Spec.Domain.Resources.Limits.Memory(), "expected memory limit to not be empty")
 	assert.NotEmpty(newVM.Spec.Template.Spec.Networks, "expected to find at least 1 network as pod network should have been applied")

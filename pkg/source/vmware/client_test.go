@@ -16,7 +16,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
-	kubevirt "kubevirt.io/api/core/v1"
+	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/server"
@@ -312,6 +312,8 @@ func Test_GenerateVirtualMachine(t *testing.T) {
 
 	newVM, err := c.GenerateVirtualMachine(vm)
 	assert.NoError(err, "expected no error during VM CR generation")
+	assert.Equal(newVM.Spec.RunStrategy, ptr.To(kubevirtv1.RunStrategyRerunOnFailure))
+	assert.Equal(newVM.Spec.Template.Spec.EvictionStrategy, ptr.To(kubevirtv1.EvictionStrategyLiveMigrateIfPossible))
 	assert.Len(newVM.Spec.Template.Spec.Networks, 1, "should have found the default pod network")
 	assert.Len(newVM.Spec.Template.Spec.Domain.Devices.Interfaces, 1, "should have found a network map")
 	assert.Equal(newVM.Spec.Template.Spec.Domain.Memory.Guest.String(), "32M", "expected VM to have 32M memory")
@@ -455,68 +457,68 @@ func Test_detectDiskBusType(t *testing.T) {
 	testCases := []struct {
 		desc     string
 		deviceID string
-		def      kubevirt.DiskBus
-		expected kubevirt.DiskBus
+		def      kubevirtv1.DiskBus
+		expected kubevirtv1.DiskBus
 	}{
 		{
 			desc:     "SCSI disk - VMware Paravirtual",
 			deviceID: "/vm-13010/ParaVirtualSCSIController0:0",
-			def:      kubevirt.DiskBusVirtio,
-			expected: kubevirt.DiskBusSATA,
+			def:      kubevirtv1.DiskBusVirtio,
+			expected: kubevirtv1.DiskBusSATA,
 		},
 		{
 			desc:     "SCSI disk - BusLogic Parallel",
 			deviceID: "/vm-13011/VirtualBusLogicController0:0",
-			def:      kubevirt.DiskBusVirtio,
-			expected: kubevirt.DiskBusSCSI,
+			def:      kubevirtv1.DiskBusVirtio,
+			expected: kubevirtv1.DiskBusSCSI,
 		},
 		{
 			desc:     "SCSI disk - LSI Logic Parallel",
 			deviceID: "/vm-13012/VirtualLsiLogicController0:0",
-			def:      kubevirt.DiskBusVirtio,
-			expected: kubevirt.DiskBusSCSI,
+			def:      kubevirtv1.DiskBusVirtio,
+			expected: kubevirtv1.DiskBusSCSI,
 		},
 		{
 			desc:     "SCSI disk - LSI Logic SAS",
 			deviceID: "/vm-13013/VirtualLsiLogicSASController0:0",
-			def:      kubevirt.DiskBusVirtio,
-			expected: kubevirt.DiskBusSCSI,
+			def:      kubevirtv1.DiskBusVirtio,
+			expected: kubevirtv1.DiskBusSCSI,
 		},
 		{
 			desc:     "NVMe disk",
 			deviceID: "/vm-2468/VirtualNVMEController0:0",
-			def:      kubevirt.DiskBusVirtio,
-			expected: kubevirt.DiskBusVirtio,
+			def:      kubevirtv1.DiskBusVirtio,
+			expected: kubevirtv1.DiskBusVirtio,
 		},
 		{
 			desc:     "USB disk",
 			deviceID: "/vm-54321/VirtualUSBController0:0",
-			def:      kubevirt.DiskBusVirtio,
-			expected: kubevirt.DiskBusUSB,
+			def:      kubevirtv1.DiskBusVirtio,
+			expected: kubevirtv1.DiskBusUSB,
 		},
 		{
 			desc:     "SATA disk",
 			deviceID: "/vm-13767/VirtualAHCIController0:1",
-			def:      kubevirt.DiskBusVirtio,
-			expected: kubevirt.DiskBusSATA,
+			def:      kubevirtv1.DiskBusVirtio,
+			expected: kubevirtv1.DiskBusSATA,
 		},
 		{
 			desc:     "IDE disk",
 			deviceID: "/vm-5678/VirtualIDEController1:0",
-			def:      kubevirt.DiskBusVirtio,
-			expected: kubevirt.DiskBusSATA,
+			def:      kubevirtv1.DiskBusVirtio,
+			expected: kubevirtv1.DiskBusSATA,
 		},
 		{
 			desc:     "Unknown disk 1",
 			deviceID: "foo",
-			def:      kubevirt.DiskBusVirtio,
-			expected: kubevirt.DiskBusVirtio,
+			def:      kubevirtv1.DiskBusVirtio,
+			expected: kubevirtv1.DiskBusVirtio,
 		},
 		{
 			desc:     "Unknown disk 2",
 			deviceID: "bar",
-			def:      kubevirt.DiskBusSATA,
-			expected: kubevirt.DiskBusSATA,
+			def:      kubevirtv1.DiskBusSATA,
+			expected: kubevirtv1.DiskBusSATA,
 		},
 	}
 
