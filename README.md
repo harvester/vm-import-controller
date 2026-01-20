@@ -185,3 +185,16 @@ export OS_VM_NAME="openstack-export-test-vm-name"
 export OS_REGION_NAME="openstack-region"
 export KUBECONFIG="kubeconfig-for-harvester-cluster"
 ```
+
+You'll need to be sure to `source .env`.
+If you're not sure about the values needed for `.env` in regards to OpenStack you can cross ref the `*-openrc.sh` file.
+Also currently, you will need to also create the [qemu-wrapper.sh](https://github.com/harvester/vm-import-controller/blob/main/package/qemu-wrapper.sh) file locally and add it to your path.
+Something like:
+```bash
+wget https://raw.githubusercontent.com/harvester/vm-import-controller/main/package/qemu-wrapper.sh -O ~/.local/bin/
+chmod +x ~/.local/bin/qemu-wrapper.sh 
+source ~/.zshrc 
+source .env
+which qemu-wrapper.sh
+```
+To ensure it's present and in the path for the integration tests.
