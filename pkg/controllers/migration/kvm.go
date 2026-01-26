@@ -32,37 +32,37 @@ func RegisterKVMController(ctx context.Context, source migrationController.KVMSo
 	source.OnChange(ctx, "kvm-source-change", kHandler.OnSourceChange)
 }
 
-func (h *kvmHandler) OnSourceChange(_ string, v *migration.KVMSource) (*migration.KVMSource, error) {
-	if v == nil || v.DeletionTimestamp != nil {
+func (h *kvmHandler) OnSourceChange(_ string, s *migration.KVMSource) (*migration.KVMSource, error) {
+	if s == nil || s.DeletionTimestamp != nil {
 		return nil, nil
 	}
 
 	logrus.WithFields(logrus.Fields{
-		"kind":      v.Kind,
-		"name":      v.Name,
-		"namespace": v.Namespace,
+		"kind":      s.Kind,
+		"name":      s.Name,
+		"namespace": s.Namespace,
 	}).Info("Reconciling source")
 
-	if v.Status.Status != migration.ClusterReady {
+	if s.Status.Status != migration.ClusterReady {
 		var client *kvm.Client
 		var err error
 
-		secretObj, err := h.secret.Get(v.SecretReference().Namespace, v.SecretReference().Name, metav1.GetOptions{})
+		secretObj, err := h.secret.Get(s.SecretReference().Namespace, s.SecretReference().Name, metav1.GetOptions{})
 		if err != nil {
-			return nil, fmt.Errorf("failed to lookup secret for %s migration %s: %w", v.Kind, v.NamespacedName(), err)
+			return nil, fmt.Errorf("failed to lookup secret for %s migration %s: %w", s.Kind, s.NamespacedName(), err)
 		}
 
-		client, err = kvm.NewClient(h.ctx, v.Spec.LibvirtURI, secretObj)
+		client, err = kvm.NewClient(h.ctx, s.Spec.LibvirtURI, secretObj, s.GetOptions().(migration.KVMSourceOptions))
 		if err != nil {
-			return nil, fmt.Errorf("failed to generate client for %s migration %s: %w", v.Kind, v.NamespacedName(), err)
+			return nil, fmt.Errorf("failed to generate client for %s migration %s: %w", s.Kind, s.NamespacedName(), err)
 		}
-		defer client.Close()
+		defer client.Close() //nolint:errcheck
 
 		if err := client.Verify(); err != nil {
 			logrus.WithFields(logrus.Fields{
-				"kind":      v.Kind,
-				"name":      v.Name,
-				"namespace": v.Namespace,
+				"kind":      s.Kind,
+				"name":      s.Name,
+				"namespace": s.Namespace,
 				"err":       err,
 			}).Error("Failed to verify source for migration")
 
@@ -80,16 +80,15 @@ func (h *kvmHandler) OnSourceChange(_ string, v *migration.KVMSource) (*migratio
 				},
 			}
 
-			v.Status.Conditions = util.MergeConditions(v.Status.Conditions, conds)
-			v.Status.Status = migration.ClusterNotReady
-			return h.source.UpdateStatus(v)
+			s.Status.Conditions = util.MergeConditions(s.Status.Conditions, conds)
+			s.Status.Status = migration.ClusterNotReady
+			return h.source.UpdateStatus(s)
 		}
 
 		// Verify connection (NewClient already dials SSH, but we can run a simple command to be sure)
 		// We can reuse PreFlightChecks logic or just run a simple command
 		// But NewClient already dials, so if it succeeds, we are connected.
 		// Let's just assume ready if NewClient succeeded.
-
 		conds := []common.Condition{
 			{
 				Type:               migration.ClusterReadyCondition,
@@ -104,10 +103,10 @@ func (h *kvmHandler) OnSourceChange(_ string, v *migration.KVMSource) (*migratio
 			},
 		}
 
-		v.Status.Conditions = util.MergeConditions(v.Status.Conditions, conds)
-		v.Status.Status = migration.ClusterReady
+		s.Status.Conditions = util.MergeConditions(s.Status.Conditions, conds)
+		s.Status.Status = migration.ClusterReady
 
-		return h.source.UpdateStatus(v)
+		return h.source.UpdateStatus(s)
 	}
 
 	return nil, nil

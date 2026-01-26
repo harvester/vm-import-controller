@@ -27,9 +27,9 @@ var (
 	KVMVMNamespacedName     types.NamespacedName
 )
 
-// SetupKVM will try and setup a kvm migration based on environment variables
+// SetupKVM will try and set up a KVM migration based on environment variables.
 // It will check the following environment variables to build migration and importjob CRD's
-// KVM_LIBVIRT_URI: Identify libvirt endpoint (e.g. qemu+ssh://user@host/system)
+// KVM_LIBVIRT_URI: Identify libvirt endpoint (e.g., qemu+ssh://user@host/system)
 // KVM_SSH_USER: Username for migration secret
 // KVM_SSH_PASSWORD: Password for migration secret
 // SVC_ADDRESS: local machine address, used to generate the URL that Harvester downloads the exported images from

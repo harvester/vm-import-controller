@@ -7,6 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	libvirtxml "libvirt.org/go/libvirtxml"
+
+	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 )
 
 func TestParseDomainXML(t *testing.T) {
@@ -66,7 +68,7 @@ func TestNewClient(t *testing.T) {
 
 	// Test with a dummy URI. Since we are using standard ssh.Dial,
 	// checking valid URI parsing is still useful, even if Dial fails.
-	_, err := NewClient(ctx, "qemu+ssh://user@localhost/system", secret)
+	_, err := NewClient(ctx, "qemu+ssh://user@localhost/system", secret, migration.KVMSourceOptions{})
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to dial ssh")
+	assert.Contains(t, err.Error(), "failed to dial host localhost:22")
 }

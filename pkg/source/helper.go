@@ -128,3 +128,9 @@ func RemoveTempImageFiles(dis []migration.DiskInfo) error {
 
 	return nil
 }
+
+// GenerateRawImageFileName Generate the raw image file name based on the VM name and
+// index of the attached volume.
+func GenerateRawImageFileName(vmName string, index int) string {
+	return fmt.Sprintf("%s-%d.img", vmName, index)
+}

@@ -5,12 +5,11 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/pkg/sftp"
 	"github.com/sirupsen/logrus"
@@ -32,10 +31,10 @@ type Client struct {
 	libvirtURI string
 }
 
-func NewClient(ctx context.Context, libvirtURI string, secret *corev1.Secret) (*Client, error) {
+func NewClient(ctx context.Context, libvirtURI string, secret *corev1.Secret, options migration.KVMSourceOptions) (*Client, error) {
 	u, err := url.Parse(libvirtURI)
 	if err != nil {
-		return nil, fmt.Errorf("invalid libvirt URI: %v", err)
+		return nil, fmt.Errorf("invalid libvirt URI: %w", err)
 	}
 
 	// Expected URI format: qemu+ssh://user@host/system or just ssh://user@host
@@ -55,7 +54,7 @@ func NewClient(ctx context.Context, libvirtURI string, secret *corev1.Secret) (*
 	if privateKey, ok := secret.Data["privateKey"]; ok {
 		signer, err := ssh.ParsePrivateKey(privateKey)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse private key: %v", err)
+			return nil, fmt.Errorf("failed to parse private key: %w", err)
 		}
 		authMethods = append(authMethods, ssh.PublicKeys(signer))
 	}
@@ -67,13 +66,11 @@ func NewClient(ctx context.Context, libvirtURI string, secret *corev1.Secret) (*
 		return nil, fmt.Errorf("no authentication methods provided in secret")
 	}
 
-	config := &ssh.ClientConfig{
-		User: user,
-		Auth: authMethods,
-		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
-			return nil
-		},
-		Timeout: 10 * time.Second,
+	sshClientConfig := &ssh.ClientConfig{
+		User:            user,
+		Auth:            authMethods,
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // nolint:gosec
+		Timeout:         options.GetSSHTimeout(),
 	}
 
 	// Handle port if missing
@@ -81,14 +78,14 @@ func NewClient(ctx context.Context, libvirtURI string, secret *corev1.Secret) (*
 		host = host + ":22"
 	}
 
-	client, err := ssh.Dial("tcp", host, config)
+	sshClient, err := ssh.Dial("tcp", host, sshClientConfig)
 	if err != nil {
-		return nil, fmt.Errorf("failed to dial ssh: %v", err)
+		return nil, fmt.Errorf("failed to dial host %s: %w", host, err)
 	}
 
 	return &Client{
 		ctx:        ctx,
-		sshClient:  client,
+		sshClient:  sshClient,
 		libvirtURI: libvirtURI,
 	}, nil
 }
@@ -101,16 +98,17 @@ func (c *Client) Close() error {
 }
 
 func (c *Client) Verify() error {
-	// We run a simple command to verify that the connection is working and we can talk to libvirt.
+	// We run a simple command to verify that the connection is working, and we can talk to libvirt.
 	// "virsh list --name" is lightweight and lists running domains.
-	_, err := c.runCommand("virsh list --name")
+	_, err := c.runCommand([]string{"list", "--name"})
 	if err != nil {
-		return fmt.Errorf("failed to verify connection to libvirt: %v", err)
+		return fmt.Errorf("failed to verify connection to %s: %w", c.libvirtURI, err)
 	}
+	logrus.Infof("Connection verified to %s", c.libvirtURI)
 	return nil
 }
 
-func (c *Client) runCommand(cmd string) (string, error) {
+func (c *Client) runCommand(args []string) (string, error) {
 	session, err := c.sshClient.NewSession()
 	if err != nil {
 		return "", err
@@ -121,7 +119,10 @@ func (c *Client) runCommand(cmd string) (string, error) {
 	session.Stdout = &stdout
 	session.Stderr = &stderr
 
-	err = session.Run(cmd)
+	args = append([]string{"-c", c.libvirtURI}, args...)
+	cmd := exec.Command("virsh", args...)
+
+	err = session.Run(cmd.String())
 	if err != nil {
 		return "", fmt.Errorf("command %q failed: %v, stderr: %s", cmd, err, stderr.String())
 	}
@@ -129,14 +130,14 @@ func (c *Client) runCommand(cmd string) (string, error) {
 }
 
 func (c *Client) getDomainXML(vmName string) (*libvirtxml.Domain, error) {
-	out, err := c.runCommand(fmt.Sprintf("virsh dumpxml %s", vmName))
+	out, err := c.runCommand([]string{"dumpxml", vmName})
 	if err != nil {
 		return nil, err
 	}
 
 	var dom libvirtxml.Domain
 	if err := dom.Unmarshal(out); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal domain xml: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal domain xml: %w", err)
 	}
 	return &dom, nil
 }
@@ -154,7 +155,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 
 	sftpClient, err := sftp.NewClient(c.sshClient)
 	if err != nil {
-		return fmt.Errorf("failed to create sftp client: %v", err)
+		return fmt.Errorf("failed to create sftp client: %w", err)
 	}
 	defer sftpClient.Close()
 
@@ -182,7 +183,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 		// Create a temporary file to store the downloaded disk
 		tmpFile, err := os.CreateTemp("", fmt.Sprintf("%s-disk-%d-", vm.Name, i))
 		if err != nil {
-			return fmt.Errorf("failed to create temporary file for download: %v", err)
+			return fmt.Errorf("failed to create temporary file for download: %w", err)
 		}
 		defer os.Remove(tmpFile.Name())
 
@@ -191,18 +192,18 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 		// Open the remote file
 		remoteFile, err := sftpClient.Open(sourceFile)
 		if err != nil {
-			return fmt.Errorf("failed to open remote file %s: %v", sourceFile, err)
+			return fmt.Errorf("failed to open remote file %s: %w", sourceFile, err)
 		}
 		defer remoteFile.Close()
 
 		// Copy the remote file to the temporary local file
 		if _, err := io.Copy(tmpFile, remoteFile); err != nil {
-			return fmt.Errorf("failed to download remote file: %v", err)
+			return fmt.Errorf("failed to download remote file: %w", err)
 		}
 		tmpFile.Close() // Close the file so qemu-img can access it
 
 		// Local destination path for the converted RAW image
-		rawDiskName := fmt.Sprintf("%s-disk-%d.img", vm.Name, i)
+		rawDiskName := source.GenerateRawImageFileName(vm.Name, i)
 		destFile := filepath.Join(server.TempDir(), rawDiskName)
 
 		logrus.Infof("Converting downloaded disk %s to %s", tmpFile.Name(), destFile)
@@ -214,15 +215,16 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 		}
 
 		if err := qemu.ConvertFromPath(tmpFile.Name(), destFile, srcFormat); err != nil {
-			return fmt.Errorf("qemu convert failed: %v", err)
+			return fmt.Errorf("qemu convert failed: %w", err)
 		}
 
 		// Update status
 		busType := kubevirt.DiskBusVirtio
 		if disk.Target != nil {
-			if disk.Target.Bus == "sata" || disk.Target.Bus == "ide" {
+			switch disk.Target.Bus {
+			case "sata", "ide":
 				busType = kubevirt.DiskBusSATA
-			} else if disk.Target.Bus == "scsi" {
+			case "scsi":
 				busType = kubevirt.DiskBusSCSI
 			}
 		}
@@ -230,7 +232,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 		// Get the size of the converted image
 		destFileInfo, err := os.Stat(destFile)
 		if err != nil {
-			return fmt.Errorf("failed to get stats for converted disk: %v", err)
+			return fmt.Errorf("failed to get stats for converted disk: %w", err)
 		}
 
 		vm.Status.DiskImportStatus = append(vm.Status.DiskImportStatus, migration.DiskInfo{
@@ -253,12 +255,12 @@ func (c *Client) ShutdownGuest(vm *migration.VirtualMachineImport) error {
 		logrus.Infof("VM %s is already powered off, skipping shutdown.", vm.Spec.VirtualMachineName)
 		return nil
 	}
-	_, err = c.runCommand(fmt.Sprintf("virsh shutdown %s", vm.Spec.VirtualMachineName))
+	_, err = c.runCommand([]string{"shutdown", vm.Spec.VirtualMachineName})
 	return err
 }
 
 func (c *Client) PowerOff(vm *migration.VirtualMachineImport) error {
-	_, err := c.runCommand(fmt.Sprintf("virsh destroy %s", vm.Spec.VirtualMachineName))
+	_, err := c.runCommand([]string{"destroy", vm.Spec.VirtualMachineName})
 	return err
 }
 
@@ -267,7 +269,7 @@ func (c *Client) IsPowerOffSupported() bool {
 }
 
 func (c *Client) IsPoweredOff(vm *migration.VirtualMachineImport) (bool, error) {
-	out, err := c.runCommand(fmt.Sprintf("virsh domstate %s", vm.Spec.VirtualMachineName))
+	out, err := c.runCommand([]string{"domstate", vm.Spec.VirtualMachineName})
 	if err != nil {
 		return false, err
 	}
@@ -287,7 +289,7 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		},
 	}
 
-	var cpuModel string
+	cpuModel := ""
 	if dom.CPU != nil && dom.CPU.Model != nil {
 		cpuModel = dom.CPU.Model.Value
 	}
@@ -295,7 +297,7 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 	// Firmware settings
 	fw := source.NewFirmware(false, false, false)
 	if dom.OS != nil && dom.OS.Loader != nil {
-		fw.UEFI = true // Presence of a loader usually indicates UEFI
+		fw.UEFI = true // The presence of a loader usually indicates UEFI
 	}
 	if dom.Devices != nil && len(dom.Devices.TPMs) > 0 {
 		fw.TPM = true
@@ -304,8 +306,8 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 	vmSpec := source.NewVirtualMachineSpec(source.VirtualMachineSpecConfig{
 		Name: vm.Status.ImportedVirtualMachineName,
 		Hardware: source.Hardware{
-			NumCPU:   uint32(dom.VCPU.Value),
-			MemoryMB: int64(dom.Memory.Value / 1024), // XML memory is usually in KiB
+			NumCPU:   uint32(dom.VCPU.Value),         // nolint:gosec
+			MemoryMB: int64(dom.Memory.Value / 1024), // nolint:gosec // XML memory is usually in KiB
 			CPUModel: cpuModel,
 		},
 	})
@@ -316,9 +318,10 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		for _, iface := range dom.Devices.Interfaces {
 			model := migration.NetworkInterfaceModelVirtio
 			if iface.Model != nil {
-				if iface.Model.Type == "e1000" {
+				switch iface.Model.Type {
+				case "e1000":
 					model = migration.NetworkInterfaceModelE1000
-				} else if iface.Model.Type == "e1000e" {
+				case "e1000e":
 					model = migration.NetworkInterfaceModelE1000e
 				}
 			}
@@ -360,9 +363,9 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 
 func (c *Client) PreFlightChecks(vm *migration.VirtualMachineImport) error {
 	// Check if VM exists
-	_, err := c.runCommand(fmt.Sprintf("virsh dominfo %s", vm.Spec.VirtualMachineName))
+	_, err := c.runCommand([]string{"dominfo", vm.Spec.VirtualMachineName})
 	if err != nil {
-		return fmt.Errorf("failed to find VM %s: %v", vm.Spec.VirtualMachineName, err)
+		return fmt.Errorf("failed to find VM %s: %w", vm.Spec.VirtualMachineName, err)
 	}
 	return nil
 }

@@ -569,7 +569,8 @@ func (h *virtualMachineHandler) generateVMO(vm *migration.VirtualMachineImport) 
 		return openstack.NewClient(h.ctx, endpoint, region, secret, options)
 	case migration.KindKVMSource:
 		uri, _ := source.GetConnectionInfo()
-		return kvm.NewClient(h.ctx, uri, secret)
+		options := source.GetOptions().(migration.KVMSourceOptions)
+		return kvm.NewClient(h.ctx, uri, secret, options)
 	}
 
 	return nil, fmt.Errorf("source kind %q not supported", source.GetKind())

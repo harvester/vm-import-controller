@@ -14,7 +14,6 @@ import (
 )
 
 var _ = Describe("test kvm export/import integration", func() {
-
 	BeforeEach(func() {
 		if !useExisting {
 			return

@@ -77,7 +77,7 @@ func Test_NewVirtualMachineSpec(t *testing.T) {
 			desc: "Basic configuration",
 			config: VirtualMachineSpecConfig{
 				Name:     "basic-vm",
-				Hardware: *NewHardware(4, 2, 8192),
+				Hardware: *NewHardware(4, 2, 8192, ""),
 			},
 			expectedCPUCores:   4,
 			expectedCPUSockets: 2,
@@ -87,7 +87,7 @@ func Test_NewVirtualMachineSpec(t *testing.T) {
 			desc: "High CPU and memory configuration",
 			config: VirtualMachineSpecConfig{
 				Name:     "high-performance-vm",
-				Hardware: *NewHardware(64, 32, 65536),
+				Hardware: *NewHardware(64, 32, 65536, ""),
 			},
 			expectedCPUCores:   64,
 			expectedCPUSockets: 32,
@@ -97,7 +97,7 @@ func Test_NewVirtualMachineSpec(t *testing.T) {
 			desc: "Minimal hardware configuration",
 			config: VirtualMachineSpecConfig{
 				Name:     "minimal-vm",
-				Hardware: *NewHardware(1, 1, 512),
+				Hardware: *NewHardware(1, 1, 512, ""),
 			},
 			expectedCPUCores:   1,
 			expectedCPUSockets: 1,

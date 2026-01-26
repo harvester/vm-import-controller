@@ -1,11 +1,18 @@
 package v1beta1
 
 import (
+	"time"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 
 	"github.com/harvester/vm-import-controller/pkg/apis/common"
+)
+
+const (
+	DefaultSSHTimeoutSeconds = 10
 )
 
 // +genclient
@@ -19,7 +26,18 @@ type KVMSource struct {
 }
 
 type KVMSourceSpec struct {
-	LibvirtURI  string                 `json:"libvirtURI"`
+	// The libvirt connection URI to connect to the KVM host.
+	// E.g., qemu+ssh://user@hostname/system
+	LibvirtURI string `json:"libvirtURI"`
+
+	// Additional options.
+	KVMSourceOptions `json:",inline"`
+
+	// The referenced `Secret` should contain the following keys:
+	// - username: (optional) The username to authenticate at the specified server.
+	// - password: (optional) The password to authenticate at the specified server.
+	// - privateKey: (optional) The private key to authenticate at the specified server.
+	// One of the authentication fields password or privateKey must be specified.
 	Credentials corev1.SecretReference `json:"credentials"`
 }
 
@@ -27,6 +45,14 @@ type KVMSourceStatus struct {
 	Status ClusterStatus `json:"status,omitempty"`
 	// +optional
 	Conditions []common.Condition `json:"conditions,omitempty"`
+}
+
+type KVMSourceOptions struct {
+	// +optional
+	// Timeout is the maximum amount of time in seconds for the SSH connection
+	// to establish. A timeout of zero means no timeout.
+	// Defaults to 10 seconds.
+	SSHTimeoutSeconds *int `json:"sshTimeoutSeconds,omitempty"`
 }
 
 func (s *KVMSource) NamespacedName() string {
@@ -57,5 +83,10 @@ func (s *KVMSource) GetConnectionInfo() (string, string) {
 }
 
 func (s *KVMSource) GetOptions() interface{} {
-	return nil
+	return s.Spec.KVMSourceOptions
+}
+
+// GetSSHTimeout returns the SSH timeout duration.
+func (s *KVMSourceOptions) GetSSHTimeout() time.Duration {
+	return time.Duration(ptr.Deref(s.SSHTimeoutSeconds, DefaultSSHTimeoutSeconds)) * time.Second
 }
