@@ -18,6 +18,7 @@ const (
 	KindVmwareSource    string = "vmwaresource"
 	KindOvaSource       string = "ovasource"
 	KindOpenstackSource string = "openstacksource"
+	KindKVMSource       string = "kvmsource"
 )
 
 type ClusterStatus string

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"syscall"
 
 	"github.com/sirupsen/logrus"
 )
@@ -20,6 +19,17 @@ func ConvertVMDKtoRAW(source, target string) error {
 	return runCommand(defaultCommand, args...)
 }
 
+func ConvertFromPath(source, target, format string) error {
+	logrus.WithFields(logrus.Fields{
+		"source": source,
+		"target": target,
+		"format": format,
+	}).Info("Converting image from path to RAW ...")
+	// qemu-img convert -f <format> -O raw <source> <target>
+	args := []string{"convert", "-f", format, "-O", "raw", source, target}
+	return runCommand(defaultCommand, args...)
+}
+
 func createVMDK(path string, size string) error {
 	args := []string{"create", "-f", "vmdk", path, size}
 	return runCommand(defaultCommand, args...)
@@ -27,9 +37,7 @@ func createVMDK(path string, size string) error {
 
 func runCommand(command string, args ...string) error {
 	cmd := exec.Command(command, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{}
 	stderr, err := cmd.StderrPipe()
-
 	if err != nil {
 		return fmt.Errorf("error creating stderr pipe: %v", err)
 	}
