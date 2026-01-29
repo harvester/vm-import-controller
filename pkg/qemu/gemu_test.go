@@ -17,7 +17,7 @@ func Test_ConvertVMDKToRaw(t *testing.T) {
 	err = createVMDK(tmpVMDK, "512M")
 	assert.NoError(err, "expected no error during tmp vmdk creation")
 	destRaw := filepath.Join(tmpDir, "vmdktest.img")
-	err = ConvertVMDKtoRAW(tmpVMDK, destRaw)
+	err = ConvertToRAW(tmpVMDK, destRaw, "vmdk")
 	assert.NoError(err, "expected no error during disk conversion")
 	f, err := os.Stat(destRaw)
 	assert.NoError(err, "expected no error during check for raw file")
