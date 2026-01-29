@@ -68,7 +68,7 @@ func TestNewClient(t *testing.T) {
 
 	// Test with a dummy URI. Since we are using standard ssh.Dial,
 	// checking valid URI parsing is still useful, even if Dial fails.
-	_, err := NewClient(ctx, "qemu+ssh://user@localhost/system", secret, migration.KVMSourceOptions{})
+	_, err := NewClient(ctx, "ssh://user@localhost:2222", secret, migration.KVMSourceOptions{})
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to dial host localhost:22")
+	assert.Contains(t, err.Error(), "failed to dial endpoint")
 }

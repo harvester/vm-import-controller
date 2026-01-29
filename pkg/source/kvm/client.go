@@ -26,27 +26,24 @@ import (
 )
 
 type Client struct {
-	ctx        context.Context
-	sshClient  *ssh.Client
-	libvirtURI string
+	ctx       context.Context
+	options   migration.KVMSourceOptions
+	sshClient *ssh.Client
 }
 
-func NewClient(ctx context.Context, libvirtURI string, secret *corev1.Secret, options migration.KVMSourceOptions) (*Client, error) {
-	u, err := url.Parse(libvirtURI)
+func NewClient(ctx context.Context, endpoint string, secret *corev1.Secret, options migration.KVMSourceOptions) (*Client, error) {
+	endpointURL, err := url.Parse(endpoint)
 	if err != nil {
-		return nil, fmt.Errorf("invalid libvirt URI: %w", err)
+		return nil, fmt.Errorf("error parsing endpoint URL: %w", err)
 	}
 
-	// Expected URI format: qemu+ssh://user@host/system or just ssh://user@host
-	// We extract host and user from the URI.
-	host := u.Host
-	user := u.User.Username()
+	host := endpointURL.Host
+	user := endpointURL.User.Username()
 	if user == "" {
-		// Try to get user from secret if not in URI
 		if secretUser, ok := secret.Data["username"]; ok {
 			user = string(secretUser)
 		} else {
-			return nil, fmt.Errorf("username not found in URI or secret")
+			return nil, fmt.Errorf("username not found in endpoint URL or secret")
 		}
 	}
 
@@ -73,20 +70,24 @@ func NewClient(ctx context.Context, libvirtURI string, secret *corev1.Secret, op
 		Timeout:         options.GetSSHTimeout(),
 	}
 
-	// Handle port if missing
 	if !strings.Contains(host, ":") {
-		host = host + ":22"
+		host = fmt.Sprintf("%s:22", host)
 	}
 
+	logrus.WithFields(logrus.Fields{
+		"host":    host,
+		"user":    user,
+		"timeout": options.GetSSHTimeout().String(),
+	}).Info("Dialing endpoint ...")
 	sshClient, err := ssh.Dial("tcp", host, sshClientConfig)
 	if err != nil {
-		return nil, fmt.Errorf("failed to dial host %s: %w", host, err)
+		return nil, fmt.Errorf("failed to dial endpoint: %w", err)
 	}
 
 	return &Client{
-		ctx:        ctx,
-		sshClient:  sshClient,
-		libvirtURI: libvirtURI,
+		ctx:       ctx,
+		options:   options,
+		sshClient: sshClient,
 	}, nil
 }
 
@@ -102,9 +103,9 @@ func (c *Client) Verify() error {
 	// "virsh list --name" is lightweight and lists running domains.
 	_, err := c.runCommand([]string{"list", "--name"})
 	if err != nil {
-		return fmt.Errorf("failed to verify connection to %s: %w", c.libvirtURI, err)
+		return fmt.Errorf("failed to verify connection to %s: %w", c.sshClient.RemoteAddr().String(), err)
 	}
-	logrus.Infof("Connection verified to %s", c.libvirtURI)
+	logrus.Infof("Connection verified to %s", c.sshClient.RemoteAddr().String())
 	return nil
 }
 
@@ -119,13 +120,19 @@ func (c *Client) runCommand(args []string) (string, error) {
 	session.Stdout = &stdout
 	session.Stderr = &stderr
 
-	args = append([]string{"-c", c.libvirtURI}, args...)
-	cmd := exec.Command("virsh", args...)
-
-	err = session.Run(cmd.String())
-	if err != nil {
-		return "", fmt.Errorf("command %q failed: %v, stderr: %s", cmd, err, stderr.String())
+	uri := c.options.GetVirshConnectionURI()
+	if uri != "" {
+		args = append([]string{"-c", uri}, args...)
 	}
+
+	cmd := exec.Command("virsh", args...)
+	cmdLine := cmd.String()
+
+	err = session.Run(cmdLine)
+	if err != nil {
+		return "", fmt.Errorf("command %q failed: %v, stderr: %s", cmdLine, err, stderr.String())
+	}
+
 	return stdout.String(), nil
 }
 
@@ -209,12 +216,12 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 		logrus.Infof("Converting downloaded disk %s to %s", tmpFile.Name(), destFile)
 
 		// Use qemu-img convert on the local, downloaded file
-		srcFormat := "qcow2" // Default assumption
+		format := "qcow2" // Default assumption
 		if disk.Driver != nil && disk.Driver.Type != "" {
-			srcFormat = disk.Driver.Type
+			format = disk.Driver.Type
 		}
 
-		if err := qemu.ConvertFromPath(tmpFile.Name(), destFile, srcFormat); err != nil {
+		if err := qemu.ConvertToRAW(tmpFile.Name(), destFile, format); err != nil {
 			return fmt.Errorf("qemu convert failed: %w", err)
 		}
 

@@ -414,7 +414,7 @@ func (c *Client) extractAndConvertVMDKToRAW(archivePath, name, dstPath string, c
 	}
 
 	if convert {
-		err = qemu.ConvertVMDKtoRAW(vmdkFile.Name(), dstPath)
+		err = qemu.ConvertToRAW(vmdkFile.Name(), dstPath, "vmdk")
 		if err != nil {
 			return fmt.Errorf("failed to convert VMDK file %q to RAW %q: %w", vmdkFile.Name(), dstPath, err)
 		}

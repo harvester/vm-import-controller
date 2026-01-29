@@ -12,7 +12,8 @@ import (
 )
 
 const (
-	DefaultSSHTimeoutSeconds = 10
+	DefaultSSHTimeoutSeconds  = 30
+	DefaultVirshConnectionURI = ""
 )
 
 // +genclient
@@ -26,9 +27,10 @@ type KVMSource struct {
 }
 
 type KVMSourceSpec struct {
-	// The libvirt connection URI to connect to the KVM host.
-	// E.g., qemu+ssh://user@hostname/system
-	LibvirtURI string `json:"libvirtURI"`
+	// The SSH host URI to connect to. If no port is specified, then default
+	// SSH port 22 will be used.
+	// E.g., `ssh://user@hostname:2222`
+	EndpointAddress string `json:"endpoint"`
 
 	// Additional options.
 	KVMSourceOptions `json:",inline"`
@@ -51,8 +53,15 @@ type KVMSourceOptions struct {
 	// +optional
 	// Timeout is the maximum amount of time in seconds for the SSH connection
 	// to establish. A timeout of zero means no timeout.
-	// Defaults to 10 seconds.
+	// Defaults to 30 seconds.
 	SSHTimeoutSeconds *int `json:"sshTimeoutSeconds,omitempty"`
+
+	// +optional
+	// The connection URI to be used by the `virsh` command that is executed on
+	// the host specified by the endpoint address.
+	// E.g., `qemu:///system`
+	// See https://libvirt.org/uri.html#local-hypervisor-uris for more information.
+	VirshConnectionURI *string `json:"virshConnectionURI"`
 }
 
 func (s *KVMSource) NamespacedName() string {
@@ -79,7 +88,7 @@ func (s *KVMSource) GetKind() string {
 }
 
 func (s *KVMSource) GetConnectionInfo() (string, string) {
-	return s.Spec.LibvirtURI, ""
+	return s.Spec.EndpointAddress, ""
 }
 
 func (s *KVMSource) GetOptions() interface{} {
@@ -89,4 +98,9 @@ func (s *KVMSource) GetOptions() interface{} {
 // GetSSHTimeout returns the SSH timeout duration.
 func (s *KVMSourceOptions) GetSSHTimeout() time.Duration {
 	return time.Duration(ptr.Deref(s.SSHTimeoutSeconds, DefaultSSHTimeoutSeconds)) * time.Second
+}
+
+// GetVirshConnectionURI returns the virsh connection URI.
+func (s *KVMSourceOptions) GetVirshConnectionURI() string {
+	return ptr.Deref(s.VirshConnectionURI, DefaultVirshConnectionURI)
 }

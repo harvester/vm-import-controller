@@ -52,7 +52,7 @@ func (h *kvmHandler) OnSourceChange(_ string, s *migration.KVMSource) (*migratio
 			return nil, fmt.Errorf("failed to lookup secret for %s migration %s: %w", s.Kind, s.NamespacedName(), err)
 		}
 
-		client, err = kvm.NewClient(h.ctx, s.Spec.LibvirtURI, secretObj, s.GetOptions().(migration.KVMSourceOptions))
+		client, err = kvm.NewClient(h.ctx, s.Spec.EndpointAddress, secretObj, s.GetOptions().(migration.KVMSourceOptions))
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate client for %s migration %s: %w", s.Kind, s.NamespacedName(), err)
 		}

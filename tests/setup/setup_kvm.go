@@ -100,9 +100,9 @@ func setupKVMSecret(ctx context.Context, k8sClient client.Client) error {
 }
 
 func setupKVMSource(ctx context.Context, k8sClient client.Client) error {
-	endpoint, ok := os.LookupEnv("KVM_LIBVIRT_URI")
+	endpoint, ok := os.LookupEnv("KVM_URL")
 	if !ok {
-		return fmt.Errorf("env variable KVM_LIBVIRT_URI not set")
+		return fmt.Errorf("env variable KVM_URL not set")
 	}
 
 	s := &migration.KVMSource{
@@ -111,7 +111,7 @@ func setupKVMSource(ctx context.Context, k8sClient client.Client) error {
 			Namespace: kvmDefaultNamespace,
 		},
 		Spec: migration.KVMSourceSpec{
-			LibvirtURI: endpoint,
+			EndpointAddress: endpoint,
 			Credentials: corev1.SecretReference{
 				Name:      kvmSecret,
 				Namespace: kvmDefaultNamespace,

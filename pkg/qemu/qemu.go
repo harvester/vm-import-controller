@@ -10,22 +10,12 @@ import (
 
 const defaultCommand = "qemu-wrapper.sh"
 
-func ConvertVMDKtoRAW(source, target string) error {
-	logrus.WithFields(logrus.Fields{
-		"source": source,
-		"target": target,
-	}).Info("Converting VMDK image to RAW ...")
-	args := []string{"convert", "-f", "vmdk", "-O", "raw", source, target}
-	return runCommand(defaultCommand, args...)
-}
-
-func ConvertFromPath(source, target, format string) error {
+func ConvertToRAW(source, target string, format string) error {
 	logrus.WithFields(logrus.Fields{
 		"source": source,
 		"target": target,
 		"format": format,
-	}).Info("Converting image from path to RAW ...")
-	// qemu-img convert -f <format> -O raw <source> <target>
+	}).Info("Converting VMDK image ...")
 	args := []string{"convert", "-f", format, "-O", "raw", source, target}
 	return runCommand(defaultCommand, args...)
 }
