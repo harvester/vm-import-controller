@@ -57,7 +57,7 @@ func NewClient(ctx context.Context, endpoint string, dc string, secret *corev1.S
 
 	endpointURL, err := url.Parse(endpoint)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing endpoint url: %v", err)
+		return nil, fmt.Errorf("error parsing endpoint URL: %v", err)
 	}
 
 	sc := soap.NewClient(endpointURL, insecure)
@@ -292,7 +292,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 		rawDiskName := util.BaseName(d.Name) + ".img"
 		destFile := filepath.Join(server.TempDir(), rawDiskName)
 
-		err = qemu.ConvertVMDKtoRAW(sourceFile, destFile)
+		err = qemu.ConvertToRAW(sourceFile, destFile, "vmdk")
 		if err != nil {
 			return fmt.Errorf("error during conversion of VMDK to RAW disk: %v", err)
 		}

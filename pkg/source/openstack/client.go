@@ -440,7 +440,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 			return fmt.Errorf("error downloading image %s: %w", volumeImage.ImageID, err)
 		}
 
-		rawImageFileName := generateRawImageFileName(vm.Status.ImportedVirtualMachineName, index)
+		rawImageFileName := source.GenerateRawImageFileName(vm.Status.ImportedVirtualMachineName, index)
 
 		logrus.WithFields(logrus.Fields{
 			"name":                    vm.Name,
@@ -539,7 +539,7 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 
 	fw, err := c.getFirmwareSettings(&vmObj.Server)
 	if err != nil {
-		return nil, fmt.Errorf("error getting firware settings: %w", err)
+		return nil, fmt.Errorf("error getting firmware settings: %w", err)
 	}
 
 	networkInfos, err := generateNetworkInfos(vmObj.Addresses, vm.GetDefaultNetworkInterfaceModel())
@@ -822,9 +822,4 @@ func writeRawImageFile(name string, src io.ReadCloser) error {
 
 	_, err = io.Copy(dst, src)
 	return err
-}
-
-// generateRawImageFileName Generate the raw image file name based on the VM name and index of the attached volume.
-func generateRawImageFileName(vmName string, index int) string {
-	return fmt.Sprintf("%s-%d.img", vmName, index)
 }

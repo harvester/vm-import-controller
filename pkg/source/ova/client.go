@@ -414,7 +414,7 @@ func (c *Client) extractAndConvertVMDKToRAW(archivePath, name, dstPath string, c
 	}
 
 	if convert {
-		err = qemu.ConvertVMDKtoRAW(vmdkFile.Name(), dstPath)
+		err = qemu.ConvertToRAW(vmdkFile.Name(), dstPath, "vmdk")
 		if err != nil {
 			return fmt.Errorf("failed to convert VMDK file %q to RAW %q: %w", vmdkFile.Name(), dstPath, err)
 		}
@@ -561,7 +561,7 @@ func detectDiskBusType(rasd *ovf.ResourceAllocationSettingData) (kubevirtv1.Disk
 // parseEnvelope retrieves the firmware, virtual hardware and network settings from the OVF envelope.
 func parseEnvelope(e *ovf.Envelope, defaultInterfaceModel string, defaultDiskBusType kubevirtv1.DiskBus) (*source.Firmware, *source.Hardware, []source.NetworkInfo, []migration.DiskInfo) {
 	fw := source.NewFirmware(false, false, false)
-	hw := source.NewHardware(0, 0, 0)
+	hw := source.NewHardware(0, 0, 0, "")
 	nis := make([]source.NetworkInfo, 0)
 	dis := make([]migration.DiskInfo, 0)
 

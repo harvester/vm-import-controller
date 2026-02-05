@@ -91,6 +91,45 @@ NAME       STATUS
 devstack   clusterReady
 ```
 
+For KVM based source clusters a sample definition is as follows:
+
+```yaml
+apiVersion: migration.harvesterhci.io/v1beta1
+kind: KVMSource
+metadata:
+  name: kvm
+  namespace: default
+spec:
+  libvirtURI: qemu+ssh://<KVM_HOST>/system
+  credentials:
+    name: kvm-credentials
+    namespace: default
+```
+
+The secret contains the credentials for the KVM host:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kvm-credentials
+  namespace: default
+type: Opaque
+stringData:
+  privateKey: |
+  -----BEGIN RSA PRIVATE KEY-----
+  ...
+  -----END RSA PRIVATE KEY-----
+```
+
+KVM source reconcile process, attempts to list VM's in the cluster, and marks the source as ready
+
+```shell
+$ kubectl get kvmsource.migration
+NAME       STATUS
+kvm        clusterReady
+```
+
 ### VirtualMachimeImport
 The VirtualMachineImport crd provides a way for users to define the source VM and mapping to the actual source cluster to perform the VM export-import from.
 
@@ -131,7 +170,7 @@ $ kubectl get virtualmachineimport.migration
 NAME                    STATUS
 alpine-export-test      virtualMachineRunning
 openstack-cirros-test   virtualMachineRunning
-
+kvm-export-test         virtualMachineRunning
 ```
 
 Similarly, users can define a VirtualMachineImport for Openstack source as well:
@@ -158,6 +197,25 @@ spec:
 
 *NOTE:* Openstack allows users to have multiple instances with the same name. In such a scenario the users are advised to use the Instance ID. The reconcile logic tries to perform a lookup from name to ID when a name is used.
 
+And VirtualMachineImport for KMV as well:
+
+```yaml
+apiVersion: migration.harvesterhci.io/v1beta1
+kind: VirtualMachineImport
+metadata:
+  name: kvm-demo
+  namespace: default
+spec:
+  virtualMachineName: kvm-demo
+  networkMapping:
+    - sourceNetwork: "default"
+      destinationNetwork: "default/vlan1"
+  sourceCluster:
+    kind: KVMSource
+    name: kvm
+    namespace: default
+    apiVersion: migration.harvesterhci.io/v1beta1
+```
 
 ## Testing
 Currently basic integration tests are available under `tests/integration`
@@ -183,5 +241,9 @@ export OS_USERNAME="openstack-username"
 export OS_PASSWORD="openstack-password"
 export OS_VM_NAME="openstack-export-test-vm-name"
 export OS_REGION_NAME="openstack-region"
+export KVM_LIBVIRT_URI="qemu+ssh://<KVM_USER>@<KVM_HOST>"
+export KVM_SSH_USER="KVM user"
+export KVM_SSH_PRIVATE_KEY_PATH="path to KVM ssh key"
+export SKIP_VCSIM=true #When testing for KVM only
 export KUBECONFIG="kubeconfig-for-harvester-cluster"
 ```
