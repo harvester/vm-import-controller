@@ -28,7 +28,6 @@ import (
 )
 
 var (
-	KVMSourceResourceName            = "kvmsources"
 	OpenstackSourceResourceName      = "openstacksources"
 	OvaSourceResourceName            = "ovasources"
 	VirtualMachineImportResourceName = "virtualmachineimports"
@@ -56,8 +55,6 @@ var (
 // Adds the list of known types to Scheme.
 func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(SchemeGroupVersion,
-		&KVMSource{},
-		&KVMSourceList{},
 		&OpenstackSource{},
 		&OpenstackSourceList{},
 		&OvaSource{},
