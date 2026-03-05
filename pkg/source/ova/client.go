@@ -94,7 +94,7 @@ func (c *Client) Verify() error {
 			return err
 		}
 
-		resp, err := c.httpClient.Do(req)
+		resp, err := c.httpClient.Do(req) // nolint:gosec
 		if err != nil {
 			return fmt.Errorf("failed to make HEAD request: %w", err)
 		}
@@ -275,7 +275,7 @@ func (c *Client) downloadArchive(dstPath string) error {
 		return err
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.httpClient.Do(req) // nolint:gosec
 	if err != nil {
 		return fmt.Errorf("failed to make GET request: %w", err)
 	}
@@ -399,7 +399,7 @@ func (c *Client) extractAndConvertVMDKToRAW(archivePath, name, dstPath string, c
 
 	defer func() {
 		_ = vmdkFile.Close()
-		_ = os.Remove(vmdkFile.Name())
+		_ = os.Remove(vmdkFile.Name()) // nolint:gosec
 	}()
 
 	mwFile := io.MultiWriter(hashFile, vmdkFile)
@@ -706,7 +706,7 @@ func parseEnvelope(e *ovf.Envelope, defaultInterfaceModel string, defaultDiskBus
 
 // newHttpRequest creates a new HTTP request with optional basic authentication.
 func newHttpRequest(method, url string, secret *corev1.Secret) (*http.Request, error) {
-	req, err := http.NewRequest(method, url, nil)
+	req, err := http.NewRequest(method, url, nil) // nolint:gosec
 	if err != nil {
 		return nil, err
 	}

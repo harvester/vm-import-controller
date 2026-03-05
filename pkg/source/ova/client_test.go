@@ -668,7 +668,7 @@ func Test_downloadArchive(t *testing.T) {
 
 	defer func() {
 		_ = dstFile.Close()
-		_ = os.Remove(dstFile.Name())
+		_ = os.Remove(dstFile.Name()) // nolint:gosec
 	}()
 
 	testCases := []struct {
@@ -723,6 +723,6 @@ func Test_downloadArchive(t *testing.T) {
 		assert.NoError(err)
 
 		assert.FileExists(dstFile.Name())
-		_ = os.Remove(dstFile.Name())
+		_ = os.Remove(dstFile.Name()) // nolint:gosec
 	}
 }
