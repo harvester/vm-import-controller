@@ -10,9 +10,9 @@ RUN zypper addrepo http://download.opensuse.org/distribution/leap/15.3/repo/oss/
     zypper in -y qemu-x86 qemu-tools
 
 RUN export K8S_VERSION=1.24.2 && \
-    curl -sSLo envtest-bins.tar.gz "https://go.kubebuilder.io/test-tools/${K8S_VERSION}/$(go env GOOS)/$(go env GOARCH)" && \
-    mkdir /usr/local/kubebuilder && \
-    tar -C /usr/local/kubebuilder --strip-components=1 -zvxf envtest-bins.tar.gz
+    curl -sSfLO "https://github.com/kubernetes-sigs/controller-tools/releases/download/envtest-v${K8S_VERSION}/envtest-v${K8S_VERSION}-$(go env GOOS)-$(go env GOARCH).tar.gz" && \
+    mkdir -p /usr/local/kubebuilder/bin && \
+    tar -C /usr/local/kubebuilder/bin --strip-components=2 -zvxf envtest-v${K8S_VERSION}-$(go env GOOS)-$(go env GOARCH).tar.gz
 
 RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s latest
 
