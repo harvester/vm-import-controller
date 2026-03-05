@@ -132,22 +132,20 @@ var _ = BeforeSuite(func() {
 		return eg.Wait()
 	})
 
-	if os.Getenv("SKIP_VCSIM") != "true" {
-		pool, err = dockertest.NewPool("")
-		Expect(err).NotTo(HaveOccurred())
-		runOpts := &dockertest.RunOptions{
-			Name:       "vcsim-integration",
-			Repository: "vmware/vcsim",
-			Tag:        "v0.29.0",
-		}
-
-		vcsimMock, err = pool.RunWithOptions(runOpts)
-		Expect(err).NotTo(HaveOccurred())
-
-		vcsimPort = vcsimMock.GetPort("8989/tcp")
-
-		time.Sleep(30 * time.Second)
+	pool, err = dockertest.NewPool("")
+	Expect(err).NotTo(HaveOccurred())
+	runOpts := &dockertest.RunOptions{
+		Name:       "vcsim-integration",
+		Repository: "vmware/vcsim",
+		Tag:        "v0.29.0",
 	}
+
+	vcsimMock, err = pool.RunWithOptions(runOpts)
+	Expect(err).NotTo(HaveOccurred())
+
+	vcsimPort = vcsimMock.GetPort("8989/tcp")
+
+	time.Sleep(30 * time.Second)
 
 })
 

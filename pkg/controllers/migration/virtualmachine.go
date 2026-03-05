@@ -13,7 +13,6 @@ import (
 	migration "github.com/harvester/vm-import-controller/pkg/apis/migration.harvesterhci.io/v1beta1"
 	migrationController "github.com/harvester/vm-import-controller/pkg/generated/controllers/migration.harvesterhci.io/v1beta1"
 	"github.com/harvester/vm-import-controller/pkg/server"
-	"github.com/harvester/vm-import-controller/pkg/source/kvm"
 	"github.com/harvester/vm-import-controller/pkg/source/openstack"
 	"github.com/harvester/vm-import-controller/pkg/source/ova"
 	"github.com/harvester/vm-import-controller/pkg/source/vmware"
@@ -79,7 +78,6 @@ type virtualMachineHandler struct {
 	vmware    migrationController.VmwareSourceController
 	ova       migrationController.OvaSourceController
 	openstack migrationController.OpenstackSourceController
-	kvm       migrationController.KVMSourceController
 	secret    coreControllers.SecretController
 	importVM  migrationController.VirtualMachineImportController
 	vmi       harvester.VirtualMachineImageController
@@ -89,17 +87,12 @@ type virtualMachineHandler struct {
 	nadCache  ctlcniv1.NetworkAttachmentDefinitionCache
 }
 
-func RegisterVMImportController(ctx context.Context,
-	vmware migrationController.VmwareSourceController, openstack migrationController.OpenstackSourceController,
-	ova migrationController.OvaSourceController, kvm migrationController.KVMSourceController, secret coreControllers.SecretController,
-	importVM migrationController.VirtualMachineImportController, vmi harvester.VirtualMachineImageController, kubevirt kubevirtv1.VirtualMachineController,
-	pvc coreControllers.PersistentVolumeClaimController, scCache storageControllers.StorageClassCache, nadCache ctlcniv1.NetworkAttachmentDefinitionCache) {
+func RegisterVMImportController(ctx context.Context, vmware migrationController.VmwareSourceController, openstack migrationController.OpenstackSourceController, ova migrationController.OvaSourceController, secret coreControllers.SecretController, importVM migrationController.VirtualMachineImportController, vmi harvester.VirtualMachineImageController, kubevirt kubevirtv1.VirtualMachineController, pvc coreControllers.PersistentVolumeClaimController, scCache storageControllers.StorageClassCache, nadCache ctlcniv1.NetworkAttachmentDefinitionCache) {
 	vmHandler := &virtualMachineHandler{
 		ctx:       ctx,
 		vmware:    vmware,
 		openstack: openstack,
 		ova:       ova,
-		kvm:       kvm,
 		secret:    secret,
 		importVM:  importVM,
 		vmi:       vmi,
@@ -248,7 +241,7 @@ func (h *virtualMachineHandler) preFlightChecks(vm *migration.VirtualMachineImpo
 	var err error
 
 	switch strings.ToLower(vm.Spec.SourceCluster.Kind) {
-	case migration.KindVmwareSource, migration.KindOvaSource, migration.KindOpenstackSource, migration.KindKVMSource:
+	case migration.KindVmwareSource, migration.KindOvaSource, migration.KindOpenstackSource:
 		ss, err = h.generateSource(vm)
 		if err != nil {
 			return fmt.Errorf("error generating migration in preflight checks: %v", err)
@@ -567,10 +560,6 @@ func (h *virtualMachineHandler) generateVMO(vm *migration.VirtualMachineImport) 
 		endpoint, region := source.GetConnectionInfo()
 		options := source.GetOptions().(migration.OpenstackSourceOptions)
 		return openstack.NewClient(h.ctx, endpoint, region, secret, options)
-	case migration.KindKVMSource:
-		endpoint, _ := source.GetConnectionInfo()
-		options := source.GetOptions().(migration.KVMSourceOptions)
-		return kvm.NewClient(h.ctx, endpoint, secret, options)
 	}
 
 	return nil, fmt.Errorf("source kind %q not supported", source.GetKind())
@@ -587,8 +576,6 @@ func (h *virtualMachineHandler) generateSource(vm *migration.VirtualMachineImpor
 		si, err = h.ova.Get(vm.Spec.SourceCluster.Namespace, vm.Spec.SourceCluster.Name, metav1.GetOptions{})
 	case migration.KindOpenstackSource:
 		si, err = h.openstack.Get(vm.Spec.SourceCluster.Namespace, vm.Spec.SourceCluster.Name, metav1.GetOptions{})
-	case migration.KindKVMSource:
-		si, err = h.kvm.Get(vm.Spec.SourceCluster.Namespace, vm.Spec.SourceCluster.Name, metav1.GetOptions{})
 	default:
 		err = fmt.Errorf("source kind %q not supported", vm.Spec.SourceCluster.Kind)
 	}
