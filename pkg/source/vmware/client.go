@@ -228,7 +228,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 		[]string{"config.hardware.device"},
 		&vmMo)
 	if err != nil {
-		return fmt.Errorf("failed to retrieve VM hardware devices: %v", err)
+		return fmt.Errorf("failed to retrieve VM hardware devices: %w", err)
 	}
 
 	sizeByVmdk := map[string]int64{}
@@ -239,9 +239,11 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 			continue
 		}
 
-		if b, ok := disk.Backing.(*types.VirtualDiskFlatVer2BackingInfo); ok && b.FileName != "" {
-			base := strings.ToLower(filepath.Base(b.FileName))
-			sizeByVmdk[base] = disk.CapacityInKB * 1024
+		if fileBacking, ok := disk.Backing.(types.BaseVirtualDeviceFileBackingInfo); ok {
+			if backingInfo := fileBacking.GetVirtualDeviceFileBackingInfo(); backingInfo != nil && backingInfo.FileName != "" {
+				base := strings.ToLower(filepath.Base(backingInfo.FileName))
+				sizeByVmdk[base] = disk.CapacityInKB * 1024
+			}
 		}
 	}
 
