@@ -223,9 +223,45 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 		"spec":      info.Items,
 	}, []string{"spec"})).Info("Origin spec of the volumes to be imported")
 
+	var vmMo mo.VirtualMachine
+	err = vmObj.Properties(c.ctx, vmObj.Reference(),
+		[]string{"config.hardware.device"},
+		&vmMo)
+	if err != nil {
+		return fmt.Errorf("failed to retrieve VM hardware devices: %v", err)
+	}
+
+	sizeByVmdk := map[string]int64{}
+
+	for _, dev := range vmMo.Config.Hardware.Device {
+		disk, ok := dev.(*types.VirtualDisk)
+		if !ok || disk.Backing == nil {
+			continue
+		}
+
+		if b, ok := disk.Backing.(*types.VirtualDiskFlatVer2BackingInfo); ok && b.FileName != "" {
+			base := strings.ToLower(filepath.Base(b.FileName))
+			sizeByVmdk[base] = disk.CapacityInKB * 1024
+		}
+	}
+
 	for _, i := range info.Items {
 		// ignore iso and nvram disks
 		if strings.HasSuffix(i.Path, ".vmdk") {
+			baseItem := strings.ToLower(filepath.Base(i.Path))
+			diskSize := sizeByVmdk[baseItem]
+
+			if diskSize == 0 {
+				// fallback to lease size if mapping failed
+				logrus.WithFields(logrus.Fields{
+					"name": vm.Name, "namespace": vm.Namespace,
+					"path":     i.Path,
+					"deviceId": i.DeviceId,
+					"size":     i.Size,
+				}).Warn("Failed to map lease VMDK to VirtualDisk capacity; falling back to lease item size")
+				diskSize = i.Size
+			}
+
 			if !strings.HasPrefix(i.Path, vm.Spec.VirtualMachineName) {
 				i.Path = vm.Name + "-" + vm.Namespace + "-" + i.Path
 			}
@@ -241,7 +277,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 				"deviceId":                i.DeviceId,
 				"path":                    i.Path,
 				"busType":                 busType,
-				"size":                    i.Size,
+				"size":                    diskSize,
 			}).Info("Downloading an image")
 
 			exportPath := filepath.Join(tmpPath, i.Path)
@@ -249,9 +285,10 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 			if err != nil {
 				return err
 			}
+
 			vm.Status.DiskImportStatus = append(vm.Status.DiskImportStatus, migration.DiskInfo{
 				Name:     i.Path,
-				DiskSize: i.Size,
+				DiskSize: diskSize,
 				BusType:  busType,
 			})
 		} else {
