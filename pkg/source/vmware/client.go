@@ -235,19 +235,27 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 	diskByBusUnit := map[diskKey]*types.VirtualDisk{}
 	controllerBus := map[int32]int32{}
 
+	// it's rare, but we cannot ensure the controller will always be before the disk in the list of devices
+	// so we need to loop through the devices twice to build a map of disks by their bus and unit numbers
 	for _, dev := range vmMo.Config.Hardware.Device {
-		switch d := dev.(type) {
-		case types.BaseVirtualController:
+		if d, ok := dev.(types.BaseVirtualController); ok {
 			ctrl := d.GetVirtualController()
 			controllerBus[dev.GetVirtualDevice().Key] = ctrl.BusNumber
+		}
+	}
 
-		case *types.VirtualDisk:
+	for _, dev := range vmMo.Config.Hardware.Device {
+		if d, ok := dev.(*types.VirtualDisk); ok {
 			if d.UnitNumber == nil {
 				continue
 			}
 
 			bus, ok := controllerBus[d.ControllerKey]
 			if !ok {
+				logrus.WithFields(logrus.Fields{
+					"controllerKey": d.ControllerKey,
+					"diskKey":       d.Key,
+				}).Warn("Controller not found for disk")
 				continue
 			}
 
@@ -732,14 +740,11 @@ type diskKey struct {
 }
 
 func parseDeviceId(deviceId string) (bus int32, unit int32, ok bool) {
-	deviceId = strings.TrimPrefix(deviceId, "/")
-	parts := strings.Split(deviceId, "/")
-	if len(parts) != 2 {
-		return
+	if idx := strings.LastIndex(deviceId, "/"); idx >= 0 {
+		deviceId = deviceId[idx+1:]
 	}
 
-	ctrlPart := parts[1]
-	colon := strings.Split(ctrlPart, ":")
+	colon := strings.Split(deviceId, ":")
 	if len(colon) != 2 {
 		return
 	}
