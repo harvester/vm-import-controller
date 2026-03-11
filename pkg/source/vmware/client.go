@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -223,9 +224,64 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 		"spec":      info.Items,
 	}, []string{"spec"})).Info("Origin spec of the volumes to be imported")
 
+	var vmMo mo.VirtualMachine
+	err = vmObj.Properties(c.ctx, vmObj.Reference(),
+		[]string{"config.hardware.device"},
+		&vmMo)
+	if err != nil {
+		return fmt.Errorf("failed to retrieve VM hardware devices: %w", err)
+	}
+
+	diskByBusUnit := map[diskKey]*types.VirtualDisk{}
+	controllerBus := map[int32]int32{}
+
+	for _, dev := range vmMo.Config.Hardware.Device {
+		switch d := dev.(type) {
+		case types.BaseVirtualController:
+			ctrl := d.GetVirtualController()
+			controllerBus[dev.GetVirtualDevice().Key] = ctrl.BusNumber
+
+		case *types.VirtualDisk:
+			if d.UnitNumber == nil {
+				continue
+			}
+
+			bus, ok := controllerBus[d.ControllerKey]
+			if !ok {
+				continue
+			}
+
+			key := diskKey{
+				bus:  bus,
+				unit: *d.UnitNumber,
+			}
+			diskByBusUnit[key] = d
+		}
+	}
+
 	for _, i := range info.Items {
 		// ignore iso and nvram disks
 		if strings.HasSuffix(i.Path, ".vmdk") {
+			var diskSize int64
+
+			bus, unit, ok := parseDeviceId(i.DeviceId)
+			if ok {
+				if disk, found := diskByBusUnit[diskKey{bus: bus, unit: unit}]; found {
+					diskSize = disk.CapacityInKB * 1024
+				}
+			}
+
+			if diskSize == 0 {
+				// fallback to lease size if mapping failed
+				logrus.WithFields(logrus.Fields{
+					"name": vm.Name, "namespace": vm.Namespace,
+					"path":     i.Path,
+					"deviceId": i.DeviceId,
+					"size":     i.Size,
+				}).Warn("Failed to map lease VMDK to VirtualDisk capacity; falling back to lease item size")
+				diskSize = i.Size
+			}
+
 			if !strings.HasPrefix(i.Path, vm.Spec.VirtualMachineName) {
 				i.Path = vm.Name + "-" + vm.Namespace + "-" + i.Path
 			}
@@ -241,7 +297,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 				"deviceId":                i.DeviceId,
 				"path":                    i.Path,
 				"busType":                 busType,
-				"size":                    i.Size,
+				"size":                    diskSize,
 			}).Info("Downloading an image")
 
 			exportPath := filepath.Join(tmpPath, i.Path)
@@ -249,9 +305,10 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 			if err != nil {
 				return err
 			}
+
 			vm.Status.DiskImportStatus = append(vm.Status.DiskImportStatus, migration.DiskInfo{
 				Name:     i.Path,
-				DiskSize: i.Size,
+				DiskSize: diskSize,
 				BusType:  busType,
 			})
 		} else {
@@ -667,4 +724,45 @@ func getFirmwareSettings(o *mo.VirtualMachine) *source.Firmware {
 	fw.TPM = ptr.Deref(o.Summary.Config.TpmPresent, false)
 
 	return fw
+}
+
+type diskKey struct {
+	bus  int32
+	unit int32
+}
+
+func parseDeviceId(deviceId string) (bus int32, unit int32, ok bool) {
+	deviceId = strings.TrimPrefix(deviceId, "/")
+	parts := strings.Split(deviceId, "/")
+	if len(parts) != 2 {
+		return
+	}
+
+	ctrlPart := parts[1]
+	colon := strings.Split(ctrlPart, ":")
+	if len(colon) != 2 {
+		return
+	}
+
+	unit64, err := strconv.ParseInt(colon[1], 10, 32)
+	if err != nil {
+		return
+	}
+
+	// find trailing digits for bus number
+	i := len(colon[0]) - 1
+	for i >= 0 && colon[0][i] >= '0' && colon[0][i] <= '9' {
+		i--
+	}
+
+	if i == len(colon[0])-1 {
+		return
+	}
+
+	bus64, err := strconv.ParseInt(colon[0][i+1:], 10, 32)
+	if err != nil {
+		return
+	}
+
+	return int32(bus64), int32(unit64), true
 }
