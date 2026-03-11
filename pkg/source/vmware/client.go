@@ -274,7 +274,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 
 			bus, unit, ok := parseDeviceId(i.DeviceId)
 			if ok {
-				if disk, found := diskByBusUnit[diskKey{bus: bus, unit: unit}]; found {
+				if disk, ok := diskByBusUnit[diskKey{bus: bus, unit: unit}]; ok {
 					diskSize = disk.CapacityInKB * 1024
 				}
 			}
