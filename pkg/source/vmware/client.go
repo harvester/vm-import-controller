@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -223,9 +224,75 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 		"spec":      info.Items,
 	}, []string{"spec"})).Info("Origin spec of the volumes to be imported")
 
+	var vmMo mo.VirtualMachine
+	err = vmObj.Properties(c.ctx, vmObj.Reference(),
+		[]string{"config.hardware.device"},
+		&vmMo)
+	if err != nil {
+		return fmt.Errorf("failed to retrieve VM hardware devices: %w", err)
+	}
+
+	diskByBusUnit := map[diskKey]*types.VirtualDisk{}
+	controllerBus := map[int32]int32{}
+
+	// by building this map, we can later match each lease disk entry to the corresponding
+	// VirtualDisk device in the VM hardware and retrieve the correct disk
+	// capacity from the VM configuration instead of relying on the incorrect LeaseInfo.Items[n].Size value.
+	for _, dev := range vmMo.Config.Hardware.Device {
+		if d, ok := dev.(types.BaseVirtualController); ok {
+			ctrl := d.GetVirtualController()
+			controllerBus[dev.GetVirtualDevice().Key] = ctrl.BusNumber
+		}
+	}
+
+	// it's rare, but we cannot ensure the controller will always be before the disk in the list of devices
+	// so we need to loop through the devices twice to build a map of disks by their bus and unit numbers
+	for _, dev := range vmMo.Config.Hardware.Device {
+		if d, ok := dev.(*types.VirtualDisk); ok {
+			if d.UnitNumber == nil {
+				continue
+			}
+
+			bus, ok := controllerBus[d.ControllerKey]
+			if !ok {
+				logrus.WithFields(logrus.Fields{
+					"controllerKey": d.ControllerKey,
+					"diskKey":       d.Key,
+				}).Warn("Controller not found for disk")
+				continue
+			}
+
+			key := diskKey{
+				bus:  bus,
+				unit: *d.UnitNumber,
+			}
+			diskByBusUnit[key] = d
+		}
+	}
+
 	for _, i := range info.Items {
 		// ignore iso and nvram disks
 		if strings.HasSuffix(i.Path, ".vmdk") {
+			var diskSize int64
+
+			bus, unit, ok := parseDeviceId(i.DeviceId)
+			if ok {
+				if disk, ok := diskByBusUnit[diskKey{bus: bus, unit: unit}]; ok {
+					diskSize = disk.CapacityInKB * 1024
+				}
+			}
+
+			if diskSize == 0 {
+				// fallback to lease size if mapping failed
+				logrus.WithFields(logrus.Fields{
+					"name": vm.Name, "namespace": vm.Namespace,
+					"path":     i.Path,
+					"deviceId": i.DeviceId,
+					"size":     i.Size,
+				}).Warn("Failed to map lease VMDK to VirtualDisk capacity; falling back to lease item size")
+				diskSize = i.Size
+			}
+
 			if !strings.HasPrefix(i.Path, vm.Spec.VirtualMachineName) {
 				i.Path = vm.Name + "-" + vm.Namespace + "-" + i.Path
 			}
@@ -241,7 +308,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 				"deviceId":                i.DeviceId,
 				"path":                    i.Path,
 				"busType":                 busType,
-				"size":                    i.Size,
+				"size":                    diskSize,
 			}).Info("Downloading an image")
 
 			exportPath := filepath.Join(tmpPath, i.Path)
@@ -249,9 +316,10 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 			if err != nil {
 				return err
 			}
+
 			vm.Status.DiskImportStatus = append(vm.Status.DiskImportStatus, migration.DiskInfo{
 				Name:     i.Path,
-				DiskSize: i.Size,
+				DiskSize: diskSize,
 				BusType:  busType,
 			})
 		} else {
@@ -667,4 +735,71 @@ func getFirmwareSettings(o *mo.VirtualMachine) *source.Firmware {
 	fw.TPM = ptr.Deref(o.Summary.Config.TpmPresent, false)
 
 	return fw
+}
+
+// diskKey uniquely identifies a disk in the VM hardware topology
+// using the (controller bus, unit) address.
+type diskKey struct {
+	bus  int32
+	unit int32
+}
+
+// parseDeviceId extracts the controller bus number and unit number from an
+// OVF HttpNfcLease DeviceId.
+//
+// In VMware OVF exports, each disk file in HttpNfcLeaseInfo.Items contains a
+// DeviceId string identifying the virtual device. The format typically looks like:
+//
+//	/vm-13010/VirtualSCSIController0:0
+//
+// or sometimes simply:
+//
+//	scsi0:0
+//
+// The format can be generalized as:
+//
+//	[optional path]/<controller><bus>:<unit>
+//
+// Examples:
+//
+//	/vm-13010/VirtualSCSIController0:0  -> bus=0, unit=0
+//	/vm-13010/VirtualNVMEController1:2  -> bus=1, unit=2
+//	scsi0:1                            -> bus=0, unit=1
+//
+// The controller prefix may vary (SCSI, NVME, AHCI, IDE, etc.).
+// Only the trailing digits before ":" represent the bus number.
+//
+// This function extracts the last path segment and parses the bus and unit
+// numbers without relying on regex.
+func parseDeviceId(deviceId string) (bus int32, unit int32, ok bool) {
+	if idx := strings.LastIndex(deviceId, "/"); idx >= 0 {
+		deviceId = deviceId[idx+1:]
+	}
+
+	colon := strings.Split(deviceId, ":")
+	if len(colon) != 2 {
+		return
+	}
+
+	unit64, err := strconv.ParseInt(colon[1], 10, 32)
+	if err != nil {
+		return
+	}
+
+	// find trailing digits for bus number
+	i := len(colon[0]) - 1
+	for i >= 0 && colon[0][i] >= '0' && colon[0][i] <= '9' {
+		i--
+	}
+
+	if i == len(colon[0])-1 {
+		return
+	}
+
+	bus64, err := strconv.ParseInt(colon[0][i+1:], 10, 32)
+	if err != nil {
+		return
+	}
+
+	return int32(bus64), int32(unit64), true
 }
