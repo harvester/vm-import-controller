@@ -235,8 +235,9 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 	diskByBusUnit := map[diskKey]*types.VirtualDisk{}
 	controllerBus := map[int32]int32{}
 
-	// it's rare, but we cannot ensure the controller will always be before the disk in the list of devices
-	// so we need to loop through the devices twice to build a map of disks by their bus and unit numbers
+	// by building this map, we can later match each lease disk entry to the corresponding
+	// VirtualDisk device in the VM hardware and retrieve the correct disk
+	// capacity from the VM configuration instead of relying on the incorrect LeaseInfo.Items[n].Size value.
 	for _, dev := range vmMo.Config.Hardware.Device {
 		if d, ok := dev.(types.BaseVirtualController); ok {
 			ctrl := d.GetVirtualController()
@@ -244,6 +245,8 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 		}
 	}
 
+	// it's rare, but we cannot ensure the controller will always be before the disk in the list of devices
+	// so we need to loop through the devices twice to build a map of disks by their bus and unit numbers
 	for _, dev := range vmMo.Config.Hardware.Device {
 		if d, ok := dev.(*types.VirtualDisk); ok {
 			if d.UnitNumber == nil {
@@ -734,11 +737,40 @@ func getFirmwareSettings(o *mo.VirtualMachine) *source.Firmware {
 	return fw
 }
 
+// diskKey uniquely identifies a disk in the VM hardware topology
+// using the (controller bus, unit) address.
 type diskKey struct {
 	bus  int32
 	unit int32
 }
 
+// parseDeviceId extracts the controller bus number and unit number from an
+// OVF HttpNfcLease DeviceId.
+//
+// In VMware OVF exports, each disk file in HttpNfcLeaseInfo.Items contains a
+// DeviceId string identifying the virtual device. The format typically looks like:
+//
+//	/vm-13010/VirtualSCSIController0:0
+//
+// or sometimes simply:
+//
+//	scsi0:0
+//
+// The format can be generalized as:
+//
+//	[optional path]/<controller><bus>:<unit>
+//
+// Examples:
+//
+//	/vm-13010/VirtualSCSIController0:0  -> bus=0, unit=0
+//	/vm-13010/VirtualNVMEController1:2  -> bus=1, unit=2
+//	scsi0:1                            -> bus=0, unit=1
+//
+// The controller prefix may vary (SCSI, NVME, AHCI, IDE, etc.).
+// Only the trailing digits before ":" represent the bus number.
+//
+// This function extracts the last path segment and parses the bus and unit
+// numbers without relying on regex.
 func parseDeviceId(deviceId string) (bus int32, unit int32, ok bool) {
 	if idx := strings.LastIndex(deviceId, "/"); idx >= 0 {
 		deviceId = deviceId[idx+1:]
