@@ -527,3 +527,77 @@ func Test_detectDiskBusType(t *testing.T) {
 		assert.Equal(tc.expected, busType)
 	}
 }
+
+func TestParseDeviceId(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		bus   int32
+		unit  int32
+		ok    bool
+	}{
+		{
+			name:  "full path scsi",
+			input: "/vm-13010/VirtualSCSIController0:0",
+			bus:   0,
+			unit:  0,
+			ok:    true,
+		},
+		{
+			name:  "nvme controller",
+			input: "/vm-42/VirtualNVMEController1:2",
+			bus:   1,
+			unit:  2,
+			ok:    true,
+		},
+		{
+			name:  "short format",
+			input: "scsi0:1",
+			bus:   0,
+			unit:  1,
+			ok:    true,
+		},
+		{
+			name:  "multiple path segments",
+			input: "/a/b/c/scsi2:3",
+			bus:   2,
+			unit:  3,
+			ok:    true,
+		},
+		{
+			name:  "invalid no colon",
+			input: "scsi0",
+			ok:    false,
+		},
+		{
+			name:  "invalid bus",
+			input: "scsiX:1",
+			ok:    false,
+		},
+		{
+			name:  "invalid unit",
+			input: "scsi0:X",
+			ok:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bus, unit, ok := parseDeviceId(tt.input)
+
+			if ok != tt.ok {
+				t.Fatalf("expected ok=%v got %v", tt.ok, ok)
+			}
+
+			if ok {
+				if bus != tt.bus {
+					t.Fatalf("expected bus=%d got %d", tt.bus, bus)
+				}
+
+				if unit != tt.unit {
+					t.Fatalf("expected unit=%d got %d", tt.unit, unit)
+				}
+			}
+		})
+	}
+}
