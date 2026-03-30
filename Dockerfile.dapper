@@ -3,23 +3,32 @@ FROM registry.suse.com/bci/golang:1.25.7
 ARG DAPPER_HOST_ARCH
 ENV ARCH $DAPPER_HOST_ARCH
 
-RUN zypper -n install tar gzip bash git gcc docker vim less file curl wget ca-certificates
+RUN zypper -n install tar gzip bash git gcc docker docker-buildx vim less file curl wget ca-certificates
 
 RUN zypper addrepo http://download.opensuse.org/distribution/leap/15.3/repo/oss/ oss && \
     zypper --gpg-auto-import-keys refresh && \
     zypper in -y qemu-x86 qemu-tools
 
+# Get checksums at https://github.com/kubernetes-sigs/controller-tools/blob/main/envtest-releases.yaml
 RUN export K8S_VERSION=1.24.2 && \
-    curl -sSfLO "https://github.com/kubernetes-sigs/controller-tools/releases/download/envtest-v${K8S_VERSION}/envtest-v${K8S_VERSION}-$(go env GOOS)-$(go env GOARCH).tar.gz" && \
+    export OS=$(go env GOOS) && \
+    export ARCH=$(go env GOARCH) && \
+    case "${OS}-${ARCH}" in \
+        darwin-amd64) EXPECTED_HASH="8d0a73308daafbb65ed97449bce81e09d249045d4594ce4e4050cc8c5f2aa3147bf4a4fbda6b73a18b0a0cba4f88a01a4e0b9f66c371eba924e3bb36fe9860d5" ;; \
+        darwin-arm64) EXPECTED_HASH="f2eb57ac07a0eeb97d6a8e36bc397eb0b5bcaa432ccadb5a574d5684dd482d2121a193f3dfdf1ee04b4df7cdead8d899c5a57e753283ea406bad560063dbabb7" ;; \
+        linux-amd64) EXPECTED_HASH="2b330c1802f7fd858a8a6e97141b07a4260eec135712c8913d36bb8e48f8dbfa45a8e5b13c15e7c20127a55d75bfda5007bf018e853cf156e3ac2b019d492892" ;; \
+        linux-arm64) EXPECTED_HASH="5cda1ba1f734a067e8b823130fca9c6bec151106aa1d32856ef7524afdfdd733e6c5c87b1b8d41c293083fd64ac668db8b74dca26554e0c99e0120e6f99f9e21" ;; \
+        windows-amd64) EXPECTED_HASH="b9708002e6265eb72ee3ba8a229624dbb1328881f08e53855b2d22fb334d6b40af3de11b9598f3a4c6829bbb6c787aa4556479855354eda1e899df34a2e93a5c" ;; \
+        *) echo "Unsupported architecture: ${OS}-${ARCH}" && exit 1 ;; \
+    esac && \
+    curl -sSfL -o envtest-bins.tar.gz "https://github.com/kubernetes-sigs/controller-tools/releases/download/envtest-v${K8S_VERSION}/envtest-v${K8S_VERSION}-${OS}-${ARCH}.tar.gz" && \
+    echo "${EXPECTED_HASH}  envtest-bins.tar.gz" | sha512sum -c - && \
     mkdir -p /usr/local/kubebuilder/bin && \
-    tar -C /usr/local/kubebuilder/bin --strip-components=2 -zvxf envtest-v${K8S_VERSION}-$(go env GOOS)-$(go env GOARCH).tar.gz
+    tar -C /usr/local/kubebuilder/bin --strip-components=2 -zvxf envtest-bins.tar.gz && \
+    rm envtest-bins.tar.gz
 
-RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s latest
-
-# The docker version in dapper is too old to have buildx. Install it manually.
-RUN curl -sSfL https://github.com/docker/buildx/releases/download/v0.13.1/buildx-v0.13.1.linux-${ARCH} -o buildx-v0.13.1.linux-${ARCH} && \
-    chmod +x buildx-v0.13.1.linux-${ARCH} && \
-    mv buildx-v0.13.1.linux-${ARCH} /usr/local/bin/buildx
+COPY --from=golangci/golangci-lint:v2.11.4-alpine@sha256:72bcd68512b4e27540dd3a778a1b7afd45759d8145cfb3c089f1d7af53e718e9 \
+    /usr/bin/golangci-lint /usr/local/bin/golangci-lint
 
 ENV DAPPER_ENV REPO TAG DRONE_TAG CROSS
 ENV DAPPER_SOURCE /go/src/github.com/harvester/vm-import-controller
