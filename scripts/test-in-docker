@@ -1,0 +1,16 @@
+#!/bin/bash
+set -e
+
+if [ -z "$MK_TEST_CACHE_IMAGE" ]; then
+    echo "ERROR: MK_TEST_CACHE_IMAGE is not set"
+    exit 1
+fi
+
+if [ ! -S /var/run/docker.sock ]; then
+    echo "ERROR: /var/run/docker.sock not found. Docker socket is required for integration tests."
+    exit 1
+fi
+
+docker run --rm ${MK_DOCKER_RUN_OPTS_TTY} --network=host \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    "$MK_TEST_CACHE_IMAGE" /bin/bash -lc 'cp /go/src/github.com/harvester/vm-import-controller/package/qemu-wrapper.sh /usr/bin/ && ./scripts/test'
