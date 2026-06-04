@@ -1,8 +1,12 @@
 module github.com/harvester/vm-import-controller
 
+<<<<<<< HEAD
 go 1.25
 
 toolchain go1.25.2
+=======
+go 1.26
+>>>>>>> 2f6bb6a (chore: bump golang 1.26 (#159))
 
 require (
 	github.com/google/uuid v1.6.0
