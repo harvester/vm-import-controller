@@ -9,7 +9,7 @@ require (
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.7.7
 	github.com/longhorn/longhorn-manager v1.8.1
 	github.com/onsi/ginkgo/v2 v2.32.0
-	github.com/onsi/gomega v1.40.0
+	github.com/onsi/gomega v1.42.0
 	github.com/ory/dockertest/v3 v3.9.1
 	github.com/rancher/lasso v0.2.7
 	github.com/rancher/wrangler/v3 v3.2.3-rc.3
