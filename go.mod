@@ -15,7 +15,7 @@ require (
 	github.com/rancher/wrangler/v3 v3.2.3-rc.3
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.11.1
-	github.com/vmware/govmomi v0.52.0
+	github.com/vmware/govmomi v0.54.1
 	golang.org/x/sync v0.21.0
 	k8s.io/api v0.35.0
 	k8s.io/apiextensions-apiserver v0.34.0
