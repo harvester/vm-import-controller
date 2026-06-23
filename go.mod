@@ -16,7 +16,7 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.11.1
 	github.com/vmware/govmomi v0.52.0
-	golang.org/x/sync v0.20.0
+	golang.org/x/sync v0.21.0
 	k8s.io/api v0.35.0
 	k8s.io/apiextensions-apiserver v0.34.0
 	k8s.io/apimachinery v0.35.0
