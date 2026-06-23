@@ -13,7 +13,7 @@ require (
 	github.com/ory/dockertest/v3 v3.9.1
 	github.com/rancher/lasso v0.2.3
 	github.com/rancher/wrangler/v3 v3.2.2
-	github.com/sirupsen/logrus v1.9.3
+	github.com/sirupsen/logrus v1.9.4
 	github.com/stretchr/testify v1.10.0
 	github.com/vmware/govmomi v0.52.0
 	golang.org/x/sync v0.16.0
