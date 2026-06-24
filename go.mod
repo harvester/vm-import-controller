@@ -12,20 +12,20 @@ require (
 	github.com/onsi/gomega v1.39.1
 	github.com/ory/dockertest/v3 v3.9.1
 	github.com/rancher/lasso v0.2.7
-	github.com/rancher/wrangler/v3 v3.2.4
+	github.com/rancher/wrangler/v3 v3.7.0
 	github.com/sirupsen/logrus v1.9.4
 	github.com/stretchr/testify v1.11.1
 	github.com/vmware/govmomi v0.52.0
 	golang.org/x/sync v0.19.0
-	k8s.io/api v0.35.0
-	k8s.io/apiextensions-apiserver v0.34.1
-	k8s.io/apimachinery v0.35.0
+	k8s.io/api v0.36.2
+	k8s.io/apiextensions-apiserver v0.36.2
+	k8s.io/apimachinery v0.36.2
 	k8s.io/client-go v12.0.0+incompatible
-	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4
+	k8s.io/utils v0.0.0-20260617174310-a95e086a2553
 	kubevirt.io/api v1.7.0
 	kubevirt.io/kubevirt v1.7.0
-	sigs.k8s.io/cluster-api v1.9.5
-	sigs.k8s.io/controller-runtime v0.21.0
+	sigs.k8s.io/cluster-api v1.13.3
+	sigs.k8s.io/controller-runtime v0.24.1
 )
 
 require (
@@ -156,16 +156,16 @@ replace (
 	github.com/google/gnostic-models => github.com/google/gnostic-models v0.6.9
 	github.com/openshift/api => github.com/openshift/api v0.0.0-20191219222812-2987a591a72c
 	github.com/openshift/client-go => github.com/openshift/client-go v0.0.0-20200521150516-05eb9880269c
-	github.com/rancher/rancher/pkg/apis => github.com/rancher/rancher/pkg/apis v0.0.0-20250828140533-07a90f09a491
-	k8s.io/api => k8s.io/api v0.33.7
-	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.33.7
-	k8s.io/apimachinery => k8s.io/apimachinery v0.33.7
-	k8s.io/apiserver => k8s.io/apiserver v0.33.7
-	k8s.io/client-go => k8s.io/client-go v0.33.7
-	k8s.io/cloud-provider => k8s.io/cloud-provider v0.33.7
-	k8s.io/code-generator => k8s.io/code-generator v0.33.7
-	k8s.io/component-base => k8s.io/component-base v0.33.7
-	k8s.io/gengo => k8s.io/gengo v0.0.0-20240826214909-a7b603a56eb7
-	k8s.io/kube-aggregator => k8s.io/kube-aggregator v0.33.7
-	k8s.io/kube-openapi => k8s.io/kube-openapi v0.0.0-20250318190949-c8a335a9a2ff
+	github.com/rancher/rancher/pkg/apis => github.com/rancher/rancher/pkg/apis v0.0.0-20260623174132-bf30ccd1cf8b
+	k8s.io/api => k8s.io/api v0.36.2
+	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.36.2
+	k8s.io/apimachinery => k8s.io/apimachinery v0.36.2
+	k8s.io/apiserver => k8s.io/apiserver v0.36.2
+	k8s.io/client-go => k8s.io/client-go v0.36.2
+	k8s.io/cloud-provider => k8s.io/cloud-provider v0.36.2
+	k8s.io/code-generator => k8s.io/code-generator v0.36.2
+	k8s.io/component-base => k8s.io/component-base v0.36.2
+	k8s.io/gengo => k8s.io/gengo v0.0.0-20260408192533-25e2208e0dc3
+	k8s.io/kube-aggregator => k8s.io/kube-aggregator v0.36.2
+	k8s.io/kube-openapi => k8s.io/kube-openapi v0.0.0-20260624041617-8f3fa4921821
 )
