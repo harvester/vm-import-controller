@@ -12,20 +12,20 @@ require (
 	github.com/onsi/gomega v1.37.0
 	github.com/ory/dockertest/v3 v3.9.1
 	github.com/rancher/lasso v0.2.3
-	github.com/rancher/wrangler/v3 v3.2.2
+	github.com/rancher/wrangler/v3 v3.7.0
 	github.com/sirupsen/logrus v1.9.4
 	github.com/stretchr/testify v1.10.0
 	github.com/vmware/govmomi v0.52.0
 	golang.org/x/sync v0.16.0
-	k8s.io/api v0.33.1
-	k8s.io/apiextensions-apiserver v0.33.1
-	k8s.io/apimachinery v0.33.1
+	k8s.io/api v0.36.2
+	k8s.io/apiextensions-apiserver v0.36.2
+	k8s.io/apimachinery v0.36.2
 	k8s.io/client-go v12.0.0+incompatible
-	k8s.io/utils v0.0.0-20250604170112-4c0f3b243397
+	k8s.io/utils v0.0.0-20260617174310-a95e086a2553
 	kubevirt.io/api v1.5.0
 	kubevirt.io/kubevirt v1.5.0
-	sigs.k8s.io/cluster-api v1.9.4
-	sigs.k8s.io/controller-runtime v0.20.2
+	sigs.k8s.io/cluster-api v1.13.3
+	sigs.k8s.io/controller-runtime v0.24.1
 )
 
 require (
@@ -146,19 +146,19 @@ replace (
 	github.com/openshift/api => github.com/openshift/api v0.0.0-20191219222812-2987a591a72c
 	github.com/openshift/client-go => github.com/openshift/client-go v0.0.0-20200521150516-05eb9880269c
 	github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring => github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring v0.68.0
-	github.com/rancher/rancher/pkg/apis => github.com/rancher/rancher/pkg/apis v0.0.0-20250828140533-07a90f09a491
-	k8s.io/api => k8s.io/api v0.32.5
-	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.32.5
-	k8s.io/apimachinery => k8s.io/apimachinery v0.32.5
-	k8s.io/apiserver => k8s.io/apiserver v0.32.5
-	k8s.io/client-go => k8s.io/client-go v0.32.5
-	k8s.io/cloud-provider => k8s.io/cloud-provider v0.32.5
-	k8s.io/code-generator => k8s.io/code-generator v0.31.5
-	k8s.io/component-base => k8s.io/component-base v0.32.5
-	k8s.io/gengo => k8s.io/gengo v0.0.0-20240826214909-a7b603a56eb7
-	k8s.io/gengo/v2 => k8s.io/gengo/v2 v2.0.0-20240228010128-51d4e06bde70
-	k8s.io/kube-aggregator => k8s.io/kube-aggregator v0.32.5
-	k8s.io/kube-openapi => k8s.io/kube-openapi v0.0.0-20240228011516-70dd3763d340
+	github.com/rancher/rancher/pkg/apis => github.com/rancher/rancher/pkg/apis v0.0.0-20260623174132-bf30ccd1cf8b
+	k8s.io/api => k8s.io/api v0.36.2
+	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.36.2
+	k8s.io/apimachinery => k8s.io/apimachinery v0.36.2
+	k8s.io/apiserver => k8s.io/apiserver v0.36.2
+	k8s.io/client-go => k8s.io/client-go v0.36.2
+	k8s.io/cloud-provider => k8s.io/cloud-provider v0.36.2
+	k8s.io/code-generator => k8s.io/code-generator v0.36.2
+	k8s.io/component-base => k8s.io/component-base v0.36.2
+	k8s.io/gengo => k8s.io/gengo v0.0.0-20260408192533-25e2208e0dc3
+	k8s.io/gengo/v2 => k8s.io/gengo/v2 v2.0.0-20260408192533-25e2208e0dc3
+	k8s.io/kube-aggregator => k8s.io/kube-aggregator v0.36.2
+	k8s.io/kube-openapi => k8s.io/kube-openapi v0.0.0-20260624041617-8f3fa4921821
 	kubevirt.io/api => kubevirt.io/api v1.6.0
 	kubevirt.io/client-go => kubevirt.io/client-go v1.6.0
 	kubevirt.io/kubevirt => kubevirt.io/kubevirt v1.6.0
