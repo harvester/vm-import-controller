@@ -47,7 +47,7 @@ DOCKER_BUILD = docker build \
         --build-arg MK_HOST_ARCH \
         -f $(ROOT)/Dockerfile $(ROOT)
 
-.PHONY: build ci clean-all default gen-version-env generate package test validate
+.PHONY: build ci clean-all default gen-version-env generate package test validate fix
 
 
 # ---- Directories ----
@@ -59,6 +59,13 @@ $(ROOT)/bin:
 gen-version-env:
 	$(BANNER)
 	@bash $(ROOT)/scripts/version > /dev/null
+
+
+# ---- format Go code ----
+fix:
+	$(BANNER)
+	@echo "Formatting Go files ..."
+	@go fmt ./...
 
 
 # ---- Compile vm-import-controller binaries ----
