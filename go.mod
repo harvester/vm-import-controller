@@ -23,7 +23,7 @@ require (
 	k8s.io/client-go v12.0.0+incompatible
 	k8s.io/utils v0.0.0-20250604170112-4c0f3b243397
 	kubevirt.io/api v1.5.0
-	kubevirt.io/kubevirt v1.5.0
+	kubevirt.io/kubevirt v1.9.0
 	sigs.k8s.io/cluster-api v1.9.4
 	sigs.k8s.io/controller-runtime v0.20.2
 )
@@ -161,5 +161,5 @@ replace (
 	k8s.io/kube-openapi => k8s.io/kube-openapi v0.0.0-20240228011516-70dd3763d340
 	kubevirt.io/api => kubevirt.io/api v1.6.0
 	kubevirt.io/client-go => kubevirt.io/client-go v1.6.0
-	kubevirt.io/kubevirt => kubevirt.io/kubevirt v1.6.0
+	kubevirt.io/kubevirt => kubevirt.io/kubevirt v1.9.0
 )
