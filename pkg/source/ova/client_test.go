@@ -16,6 +16,7 @@ import (
 	"github.com/vmware/govmomi/ovf"
 	"github.com/vmware/govmomi/ovf/importer"
 	"github.com/vmware/govmomi/vapi/library"
+	"github.com/vmware/govmomi/vim25/types"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
 	kubevirtv1 "kubevirt.io/api/core/v1"
@@ -287,6 +288,139 @@ var ovfData3 = `<?xml version="1.0"?>
   </VirtualSystem>
 </Envelope>`
 
+// See https://github.com/brimstone/windows-ova/blob/master/Windows.ovf
+var ovfData4 = `<?xml version="1.0" encoding="UTF-8"?>
+<Envelope xmlns="http://schemas.dmtf.org/ovf/envelope/1" xmlns:cim="http://schemas.dmtf.org/wbem/wscim/1/common" xmlns:ovf="http://schemas.dmtf.org/ovf/envelope/1" xmlns:rasd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_ResourceAllocationSettingData" xmlns:vmw="http://www.vmware.com/schema/ovf" xmlns:vssd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_VirtualSystemSettingData" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:vbox="http://www.virtualbox.org/ovf/machine">
+  <References>
+    <File ovf:href="Windows-c.vmdk" ovf:id="file1" ovf:size="107374182400" />
+    <File ovf:href="Windows-d.vmdk" ovf:id="file2" ovf:size="10737418240" />
+  </References>
+  <DiskSection>
+    <Info>List of the virtual disks used in the package</Info>
+    <Disk ovf:capacity="107374182400" ovf:diskId="vmdisk1" ovf:fileRef="file1" ovf:format="http://www.vmware.com/interfaces/specifications/vmdk.html#streamOptimized" vbox:uuid="1bcd998b-a8ab-4b31-a6bb-ea958070ceb3" />
+    <Disk ovf:capacity="10737418240" ovf:diskId="vmdisk2" ovf:fileRef="file2" ovf:format="http://www.vmware.com/interfaces/specifications/vmdk.html#streamOptimized" vbox:uuid="3910cbf3-f47d-4cdc-887e-dcf4587e36a3" />
+  </DiskSection>
+  <NetworkSection>
+    <Info>Logical networks used in the package</Info>
+    <Network ovf:name="NAT">
+      <Description>Logical network used by this appliance.</Description>
+    </Network>
+  </NetworkSection>
+  <VirtualSystem ovf:id="Windows">
+    <Info>A virtual machine</Info>
+    <ProductSection>
+      <Info>Meta-information about the installed software</Info>
+      <Product>Windows</Product>
+      <ProductUrl>https://github.com/brimstone/windows-ova</ProductUrl>
+      <Version>1.2.3</Version>
+    </ProductSection>
+    <AnnotationSection>
+      <Info>A human-readable annotation</Info>
+      <Annotation>Self-Installing Windows VM</Annotation>
+    </AnnotationSection>
+    <OperatingSystemSection ovf:id="102">
+      <Info>The kind of installed guest operating system</Info>
+      <Description>Other_64</Description>
+      <vbox:OSType ovf:required="false">WindowsNT_64</vbox:OSType>
+    </OperatingSystemSection>
+    <VirtualHardwareSection>
+      <Info>Virtual hardware requirements for a virtual machine</Info>
+      <System>
+        <vssd:ElementName>Virtual Hardware Family</vssd:ElementName>
+        <vssd:InstanceID>0</vssd:InstanceID>
+        <vssd:VirtualSystemIdentifier>Windows</vssd:VirtualSystemIdentifier>
+        <vssd:VirtualSystemType>vmx-11</vssd:VirtualSystemType>
+      </System>
+      <Item>
+        <rasd:Caption>1 virtual CPU</rasd:Caption>
+        <rasd:Description>Number of virtual CPUs</rasd:Description>
+        <rasd:ElementName>1 virtual CPU</rasd:ElementName>
+        <rasd:InstanceID>1</rasd:InstanceID>
+        <rasd:ResourceType>3</rasd:ResourceType>
+        <rasd:VirtualQuantity>1</rasd:VirtualQuantity>
+      </Item>
+      <Item>
+        <rasd:AllocationUnits>MegaBytes</rasd:AllocationUnits>
+        <rasd:Caption>1024 MB of memory</rasd:Caption>
+        <rasd:Description>Memory Size</rasd:Description>
+        <rasd:ElementName>1024 MB of memory</rasd:ElementName>
+        <rasd:InstanceID>2</rasd:InstanceID>
+        <rasd:ResourceType>4</rasd:ResourceType>
+        <rasd:VirtualQuantity>1024</rasd:VirtualQuantity>
+      </Item>
+      <Item>
+        <rasd:Address>0</rasd:Address>
+        <rasd:Caption>ideController0</rasd:Caption>
+        <rasd:Description>IDE Controller</rasd:Description>
+        <rasd:ElementName>ideController0</rasd:ElementName>
+        <rasd:InstanceID>3</rasd:InstanceID>
+        <rasd:ResourceSubType>PIIX4</rasd:ResourceSubType>
+        <rasd:ResourceType>5</rasd:ResourceType>
+      </Item>
+      <Item>
+        <rasd:Address>0</rasd:Address>
+        <rasd:Caption>sataController0</rasd:Caption>
+        <rasd:Description>SATA Controller</rasd:Description>
+        <rasd:ElementName>sataController0</rasd:ElementName>
+        <rasd:InstanceID>4</rasd:InstanceID>
+        <rasd:ResourceSubType>AHCI</rasd:ResourceSubType>
+        <rasd:ResourceType>20</rasd:ResourceType>
+      </Item>
+      <Item>
+        <rasd:Address>0</rasd:Address>
+        <rasd:Caption>usb</rasd:Caption>
+        <rasd:Description>USB Controller</rasd:Description>
+        <rasd:ElementName>usb</rasd:ElementName>
+        <rasd:InstanceID>5</rasd:InstanceID>
+        <rasd:ResourceType>23</rasd:ResourceType>
+      </Item>
+      <Item>
+        <rasd:AddressOnParent>0</rasd:AddressOnParent>
+        <rasd:Caption>disk1</rasd:Caption>
+        <rasd:Description>Disk Image</rasd:Description>
+        <rasd:ElementName>disk1</rasd:ElementName>
+        <rasd:HostResource>/disk/vmdisk1</rasd:HostResource>
+        <rasd:InstanceID>6</rasd:InstanceID>
+        <rasd:Parent>4</rasd:Parent>
+        <rasd:ResourceType>17</rasd:ResourceType>
+      </Item>
+      <Item>
+        <rasd:AddressOnParent>1</rasd:AddressOnParent>
+        <rasd:Caption>disk2</rasd:Caption>
+        <rasd:Description>Disk Image</rasd:Description>
+        <rasd:ElementName>disk2</rasd:ElementName>
+        <rasd:HostResource>/disk/vmdisk2</rasd:HostResource>
+        <rasd:InstanceID>7</rasd:InstanceID>
+        <rasd:Parent>4</rasd:Parent>
+        <rasd:ResourceType>17</rasd:ResourceType>
+      </Item>
+      <Item>
+        <rasd:AddressOnParent>0</rasd:AddressOnParent>
+        <rasd:AutomaticAllocation>true</rasd:AutomaticAllocation>
+        <rasd:Caption>cdrom0</rasd:Caption>
+        <rasd:Description>CD-ROM Drive</rasd:Description>
+        <rasd:ElementName>cdrom0</rasd:ElementName>
+        <rasd:HostResource></rasd:HostResource>
+        <!-- vmware rasd:HostResource>ovf:/file/file3</rasd:HostResource-->
+        <!-- virtualbox rasd:HostResource>ovf:/disk/vmdisk3</rasd:HostResource-->
+        <rasd:InstanceID>8</rasd:InstanceID>
+        <rasd:Parent>3</rasd:Parent>
+        <rasd:ResourceType>15</rasd:ResourceType>
+      </Item>
+      <Item>
+        <rasd:AddressOnParent>7</rasd:AddressOnParent>
+        <rasd:AutomaticAllocation>true</rasd:AutomaticAllocation>
+        <rasd:Caption>Ethernet adapter on 'NAT'</rasd:Caption>
+        <rasd:Connection>NAT</rasd:Connection>
+        <rasd:ElementName>Ethernet adapter on 'NAT'</rasd:ElementName>
+        <rasd:InstanceID>9</rasd:InstanceID>
+        <rasd:ResourceSubType>E1000</rasd:ResourceSubType>
+        <rasd:ResourceType>10</rasd:ResourceType>
+      </Item>
+    </VirtualHardwareSection>
+  </VirtualSystem>
+</Envelope>`
+
 func Test_NewClient(t *testing.T) {
 	assert := require.New(t)
 
@@ -554,30 +688,33 @@ func Test_extractAndConvertVMDKToRAW(t *testing.T) {
 func Test_parseEnvelope_DiskInfo_empty(t *testing.T) {
 	assert := require.New(t)
 	e := &ovf.Envelope{}
-	_, _, _, dis := parseEnvelope(e, "", "foo")
+	_, _, _, dis, got := parseEnvelope(e, "", "foo")
 	assert.Len(dis, 0, "expected no disk info")
+	assert.Equal(source.OsUnknown, got, "expected guest OS to be unknown when there is no VirtualSystem")
 }
 
 func Test_parseEnvelope_DiskInfo_ovf_v1(t *testing.T) {
 	assert := require.New(t)
 	e, err := importer.ReadEnvelope([]byte(ovfData2))
 	assert.NoError(err, "expected no error during reading envelope")
-	_, _, _, dis := parseEnvelope(e, "", "buz")
+	_, _, _, dis, got := parseEnvelope(e, "", "buz")
 	assert.Len(dis, 1, "expected one disk info")
 	assert.Equal("gm-ubuntu-test-1.vmdk", dis[0].Name, "expected name to match")
 	assert.Equal(int64(42949672960), dis[0].DiskSize, "expected size to match")
 	assert.Equal(kubevirtv1.DiskBusSCSI, dis[0].BusType, "expected bus type to match")
+	assert.Equal(source.OsUbuntu, got, "expected guest OS to be detected from the vmw:osType attribute")
 }
 
 func Test_parseEnvelope_DiskInfo_ovf_v2(t *testing.T) {
 	assert := require.New(t)
 	e, err := importer.ReadEnvelope([]byte(ovfData3))
 	assert.NoError(err, "expected no error during reading envelope")
-	_, _, _, dis := parseEnvelope(e, "", "buz")
+	_, _, _, dis, got := parseEnvelope(e, "", "buz")
 	assert.Len(dis, 1, "expected one disk info")
 	assert.Equal("ubuntu.2.0-disk1.vmdk", dis[0].Name, "expected name to match")
 	assert.Equal(int64(8589934592), dis[0].DiskSize, "expected size to match")
 	assert.Equal(kubevirtv1.DiskBusSATA, dis[0].BusType, "expected bus type to match")
+	assert.Equal(source.OsUbuntu, got, "expected guest OS to be detected from the Description fallback (no vmw:osType in this VirtualBox-exported OVF)")
 }
 
 func Test_parseEnvelope_Firmware(t *testing.T) {
@@ -602,11 +739,19 @@ func Test_parseEnvelope_Firmware(t *testing.T) {
 	for _, tc := range testCases {
 		e, err := importer.ReadEnvelope(tc.envelope)
 		assert.NoError(err, "expected no error during reading envelope")
-		fw, _, _, _ := parseEnvelope(e, "foo", "buz")
+		fw, _, _, _, _ := parseEnvelope(e, "foo", "buz")
 		assert.Equal(tc.expected.UEFI, fw.UEFI, "expected UEFI flag to match")
 		assert.Equal(tc.expected.TPM, fw.TPM, "expected TPM flag to match")
 		assert.Equal(tc.expected.SecureBoot, fw.SecureBoot, "expected SecureBoot flag to match")
 	}
+}
+
+func Test_parseEnvelope_GuestOs(t *testing.T) {
+	assert := require.New(t)
+	e, err := importer.ReadEnvelope([]byte(ovfData4))
+	assert.NoError(err, "expected no error during reading envelope")
+	_, _, _, _, got := parseEnvelope(e, "", "xyz")
+	assert.Equal(source.OsWindows, got, "expected guest OS to be detected from the ProductSection fallback (osType is absent and the Description 'Other_64' is not recognized)")
 }
 
 func Test_parseEnvelope_Hardware(t *testing.T) {
@@ -639,7 +784,7 @@ func Test_parseEnvelope_Hardware(t *testing.T) {
 	for _, tc := range testCases {
 		e, err := importer.ReadEnvelope(tc.envelope)
 		assert.NoError(err, "expected no error during reading envelope")
-		_, hw, _, _ := parseEnvelope(e, "bar", "buz")
+		_, hw, _, _, _ := parseEnvelope(e, "bar", "buz")
 		assert.Equal(tc.expected.NumCPU, hw.NumCPU, "expected CPU count to match")
 		assert.Equal(tc.expected.NumCoresPerSocket, hw.NumCoresPerSocket, "expected number of cores per socket to match")
 		assert.Equal(tc.expected.MemoryMB, hw.MemoryMB, "expected memory size to match")
@@ -650,11 +795,105 @@ func Test_parseEnvelope_NetworkInfos_v1(t *testing.T) {
 	assert := require.New(t)
 	e, err := importer.ReadEnvelope([]byte(ovfData2))
 	assert.NoError(err, "expected no error during reading envelope")
-	_, _, ni, _ := parseEnvelope(e, "baz", "buz")
+	_, _, ni, _, _ := parseEnvelope(e, "baz", "buz")
 	assert.Len(ni, 1)
 	assert.Equal("DSwitch-vCenter-HA-VM-Network", ni[0].NetworkName, "expected network name to match")
 	assert.Empty(ni[0].MAC, "expected MAC address to be empty")
 	assert.Equal(migration.NetworkInterfaceModelRtl8139, ni[0].Model, "expected network model to match")
+}
+
+func Test_detectGuestOsType(t *testing.T) {
+	tests := []struct {
+		name          string
+		virtualSystem *ovf.VirtualSystem
+		expected      string
+	}{
+		{
+			name:          "nil virtual system",
+			virtualSystem: nil,
+			expected:      source.OsUnknown,
+		},
+		{
+			name:          "empty virtual system",
+			virtualSystem: &ovf.VirtualSystem{},
+			expected:      source.OsUnknown,
+		},
+		{
+			name: "osType from a VMware-exported OVA",
+			virtualSystem: &ovf.VirtualSystem{
+				OperatingSystem: &ovf.OperatingSystemSection{
+					OSType:      ptr.To(string(types.VirtualMachineGuestOsIdentifierUbuntu64Guest)),
+					Description: ptr.To("Ubuntu Linux (64-bit)"),
+				},
+			},
+			expected: source.OsUbuntu,
+		},
+		{
+			name: "windows osType",
+			virtualSystem: &ovf.VirtualSystem{
+				OperatingSystem: &ovf.OperatingSystemSection{
+					OSType: ptr.To(string(types.VirtualMachineGuestOsIdentifierWindows2019srvNext_64Guest)),
+				},
+			},
+			expected: source.OsWindows,
+		},
+		{
+			name: "description fallback when osType is absent, e.g. a VirtualBox-exported OVA",
+			virtualSystem: &ovf.VirtualSystem{
+				OperatingSystem: &ovf.OperatingSystemSection{
+					Description: ptr.To("Ubuntu_64"),
+				},
+			},
+			expected: source.OsUbuntu,
+		},
+		{
+			name: "unrecognised osType falls back to the description",
+			virtualSystem: &ovf.VirtualSystem{
+				OperatingSystem: &ovf.OperatingSystemSection{
+					OSType:      ptr.To(string(types.VirtualMachineGuestOsIdentifierOtherGuest)),
+					Description: ptr.To("Gentoo"),
+				},
+			},
+			expected: source.OsGentoo,
+		},
+		{
+			name: "unknown osType and description fall back to the product name",
+			virtualSystem: &ovf.VirtualSystem{
+				OperatingSystem: &ovf.OperatingSystemSection{
+					OSType:      ptr.To(string(types.VirtualMachineGuestOsIdentifierOtherGuest)),
+					Description: ptr.To("Other (32-bit)"),
+				},
+				Product: []ovf.ProductSection{{Product: "Windows"}},
+			},
+			expected: source.OsWindows,
+		},
+		{
+			name: "operating system section absent entirely, product name is the only source",
+			virtualSystem: &ovf.VirtualSystem{
+				Product: []ovf.ProductSection{{Product: "Windows"}},
+			},
+			expected: source.OsWindows,
+		},
+		{
+			name: "unknown osType, description and product name",
+			virtualSystem: &ovf.VirtualSystem{
+				OperatingSystem: &ovf.OperatingSystemSection{
+					OSType:      ptr.To(string(types.VirtualMachineGuestOsIdentifierOtherGuest)),
+					Description: ptr.To("Other (32-bit)"),
+				},
+				Product: []ovf.ProductSection{{Product: "My Custom App"}},
+			},
+			expected: source.OsUnknown,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := detectGuestOsType(tt.virtualSystem); got != tt.expected {
+				t.Fatalf("expected %q got %q", tt.expected, got)
+			}
+		})
+	}
 }
 
 func Test_downloadArchive(t *testing.T) {

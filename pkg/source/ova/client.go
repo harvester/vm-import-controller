@@ -144,7 +144,7 @@ func (c *Client) ExportVirtualMachine(vmi *migration.VirtualMachineImport) error
 		return fmt.Errorf("failed to read envelope: %w", err)
 	}
 
-	_, _, _, dis := parseEnvelope(e, vmi.GetDefaultNetworkInterfaceModel(), vmi.GetDefaultDiskBusType())
+	_, _, _, dis, _ := parseEnvelope(e, vmi.GetDefaultNetworkInterfaceModel(), vmi.GetDefaultDiskBusType())
 	logrus.WithFields(util.FieldsToJSON(logrus.Fields{
 		"name":      vmi.Name,
 		"namespace": vmi.Namespace,
@@ -178,7 +178,7 @@ func (c *Client) GenerateVirtualMachine(vmi *migration.VirtualMachineImport) (*k
 		return nil, fmt.Errorf("failed to read envelope: %w", err)
 	}
 
-	fw, hw, nis, dis := parseEnvelope(e, vmi.GetDefaultNetworkInterfaceModel(), vmi.GetDefaultDiskBusType())
+	fw, hw, nis, dis, got := parseEnvelope(e, vmi.GetDefaultNetworkInterfaceModel(), vmi.GetDefaultDiskBusType())
 	logrus.WithFields(util.FieldsToJSON(logrus.Fields{
 		"name":         vmi.Name,
 		"namespace":    vmi.Namespace,
@@ -186,6 +186,7 @@ func (c *Client) GenerateVirtualMachine(vmi *migration.VirtualMachineImport) (*k
 		"hardware":     hw,
 		"networkInfos": nis,
 		"diskInfos":    dis,
+		"guestOsType":  got,
 	}, []string{"firmware", "hardware", "networkInfos", "diskInfos"})).Info("Parsed configuration from OVF envelope")
 
 	newVM := &kubevirtv1.VirtualMachine{
@@ -213,6 +214,8 @@ func (c *Client) GenerateVirtualMachine(vmi *migration.VirtualMachineImport) (*k
 	vmSpec.Template.Spec.Networks = networkConfig
 	vmSpec.Template.Spec.Domain.Devices.Interfaces = interfaceConfig
 	newVM.Spec = *vmSpec
+
+	source.ApplyGuestOsLabel(newVM, got)
 
 	return newVM, nil
 }
@@ -558,15 +561,57 @@ func detectDiskBusType(rasd *ovf.ResourceAllocationSettingData) (kubevirtv1.Disk
 	return busType, busType != ""
 }
 
-// parseEnvelope retrieves the firmware, virtual hardware and network settings from the OVF envelope.
-func parseEnvelope(e *ovf.Envelope, defaultInterfaceModel string, defaultDiskBusType kubevirtv1.DiskBus) (*source.Firmware, *source.Hardware, []source.NetworkInfo, []migration.DiskInfo) {
+// detectGuestOsType determines the guest OS type from an OVF VirtualSystem,
+// preferring the most specific source available:
+//  1. OperatingSystemSection.OSType: for OVAs exported by VMware, this is set
+//     to the same guest OS identifier vocabulary used by the vSphere API
+//     (see vim25/types.VirtualMachineGuestOsIdentifier), e.g. "ubuntu64Guest".
+//  2. OperatingSystemSection.Description: free text (e.g. "Ubuntu Linux
+//     (64-bit)"), used as a fallback for OVAs from other exporters that
+//     don't set OSType (e.g. VirtualBox).
+//  3. ProductSection.Product: free text naming the packaged product (e.g.
+//     "Windows"), used as a last resort when OperatingSystemSection is
+//     absent or carries no usable information at all.
+func detectGuestOsType(vs *ovf.VirtualSystem) string {
+	if vs == nil {
+		return source.OsUnknown
+	}
+
+	if oss := vs.OperatingSystem; oss != nil {
+		if oss.OSType != nil {
+			if osType := source.GuestOsIdToOsType(*oss.OSType); osType != source.OsUnknown {
+				return osType
+			}
+		}
+		if oss.Description != nil {
+			if osType := source.GuestOsNameToOsType(*oss.Description); osType != source.OsUnknown {
+				return osType
+			}
+		}
+	}
+
+	for _, product := range vs.Product {
+		if osType := source.GuestOsNameToOsType(product.Product); osType != source.OsUnknown {
+			return osType
+		}
+	}
+
+	return source.OsUnknown
+}
+
+// parseEnvelope retrieves the firmware, virtual hardware, network settings
+// and guest OS from the OVF envelope.
+func parseEnvelope(e *ovf.Envelope, defaultInterfaceModel string, defaultDiskBusType kubevirtv1.DiskBus) (*source.Firmware, *source.Hardware, []source.NetworkInfo, []migration.DiskInfo, string) {
 	fw := source.NewFirmware(false, false, false)
 	hw := source.NewHardware(0, 0, 0)
 	nis := make([]source.NetworkInfo, 0)
 	dis := make([]migration.DiskInfo, 0)
+	got := source.OsUnknown
 
 	if e.VirtualSystem != nil {
 		disks := ptr.Deref(e.Disk, ovf.DiskSection{Disks: []ovf.VirtualDiskDesc{}}).Disks
+
+		got = detectGuestOsType(e.VirtualSystem)
 
 		for _, vh := range e.VirtualSystem.VirtualHardware {
 			// OVF v1.0 - <Item>
@@ -701,7 +746,7 @@ func parseEnvelope(e *ovf.Envelope, defaultInterfaceModel string, defaultDiskBus
 		}
 	}
 
-	return fw, hw, nis, dis
+	return fw, hw, nis, dis, got
 }
 
 // newHttpRequest creates a new HTTP request with optional basic authentication.

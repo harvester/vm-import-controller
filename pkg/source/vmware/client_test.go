@@ -23,6 +23,10 @@ import (
 	"github.com/harvester/vm-import-controller/pkg/source"
 )
 
+const (
+	vcsimContainerName = "vcsim"
+)
+
 var vcsimPort string
 
 // setup mock vmware endpoint
@@ -32,9 +36,14 @@ func TestMain(t *testing.M) {
 		log.Fatalf("error connecting to dockerd: %v", err)
 	}
 
+	// Remove a leftover container from a previous, interrupted test run.
+	if err := pool.RemoveContainerByName(vcsimContainerName); err != nil {
+		log.Fatalf("error removing leftover %q container: %v", vcsimContainerName, err)
+	}
+
 	// https://hub.docker.com/r/vmware/vcsim
 	runOpts := &dockertest.RunOptions{
-		Name:       "vcsim",
+		Name:       vcsimContainerName,
 		Repository: "vmware/vcsim",
 		Tag:        "v0.49.0",
 	}
@@ -42,7 +51,7 @@ func TestMain(t *testing.M) {
 	vcsimMock, err := pool.RunWithOptions(runOpts)
 
 	if err != nil {
-		log.Fatalf("error creating vcsim container: %v", err)
+		log.Fatalf("error creating %q container: %v", vcsimContainerName, err)
 	}
 
 	vcsimPort = vcsimMock.GetPort("8989/tcp")
@@ -55,7 +64,7 @@ func TestMain(t *testing.M) {
 
 	code := t.Run()
 	if err := pool.Purge(vcsimMock); err != nil {
-		log.Fatalf("error purging vcsimMock container: %v", err)
+		log.Fatalf("error purging %q container: %v", vcsimContainerName, err)
 	}
 
 	os.Exit(code)
@@ -597,6 +606,166 @@ func TestParseDeviceId(t *testing.T) {
 				if unit != tt.unit {
 					t.Fatalf("expected unit=%d got %d", tt.unit, unit)
 				}
+			}
+		})
+	}
+}
+
+func TestDetectGuestOsType(t *testing.T) {
+	tests := []struct {
+		name     string
+		vm       *mo.VirtualMachine
+		expected string
+	}{
+		{
+			name: "windows from config guest id",
+			vm: &mo.VirtualMachine{
+				Config: &types.VirtualMachineConfigInfo{GuestId: string(types.VirtualMachineGuestOsIdentifierWindows9Server64Guest)},
+			},
+			expected: source.OsWindows,
+		},
+		{
+			name: "windows server 2019 from config guest id",
+			vm: &mo.VirtualMachine{
+				Config: &types.VirtualMachineConfigInfo{GuestId: string(types.VirtualMachineGuestOsIdentifierWindows2019srvNext_64Guest)},
+			},
+			expected: source.OsWindows,
+		},
+		{
+			name: "windows server 2003 guest id does not contain the word windows",
+			vm: &mo.VirtualMachine{
+				Config: &types.VirtualMachineConfigInfo{GuestId: string(types.VirtualMachineGuestOsIdentifierWinNetStandardGuest)},
+			},
+			expected: source.OsWindows,
+		},
+		{
+			name: "legacy windows xp guest id",
+			vm: &mo.VirtualMachine{
+				Config: &types.VirtualMachineConfigInfo{GuestId: string(types.VirtualMachineGuestOsIdentifierWinXPProGuest)},
+			},
+			expected: source.OsWindows,
+		},
+		{
+			name: "linux from guest family",
+			vm: &mo.VirtualMachine{
+				Guest: &types.GuestInfo{GuestFamily: "linuxGuest"},
+			},
+			expected: source.OsLinux,
+		},
+		{
+			name: "windows from guest family even with a non-matching guest id",
+			vm: &mo.VirtualMachine{
+				Guest:  &types.GuestInfo{GuestFamily: "windowsGuest"},
+				Config: &types.VirtualMachineConfigInfo{GuestId: string(types.VirtualMachineGuestOsIdentifierOtherGuest)},
+			},
+			expected: source.OsWindows,
+		},
+		{
+			name: "sles guest id",
+			vm: &mo.VirtualMachine{
+				Config: &types.VirtualMachineConfigInfo{GuestId: string(types.VirtualMachineGuestOsIdentifierSles15_64Guest)},
+			},
+			expected: source.OsSLES,
+		},
+		{
+			name: "opensuse guest id is not detected as sles",
+			vm: &mo.VirtualMachine{
+				Config: &types.VirtualMachineConfigInfo{GuestId: string(types.VirtualMachineGuestOsIdentifierOpensuse64Guest)},
+			},
+			expected: source.OsOpenSUSE,
+		},
+		{
+			name: "ubuntu guest id",
+			vm: &mo.VirtualMachine{
+				Config: &types.VirtualMachineConfigInfo{GuestId: string(types.VirtualMachineGuestOsIdentifierUbuntu64Guest)},
+			},
+			expected: source.OsUbuntu,
+		},
+		{
+			name: "rhel guest id maps to the redhat entry",
+			vm: &mo.VirtualMachine{
+				Config: &types.VirtualMachineConfigInfo{GuestId: string(types.VirtualMachineGuestOsIdentifierRhel9_64Guest)},
+			},
+			expected: source.OsRedHat,
+		},
+		{
+			name: "centos guest id maps to the harvester otherLinux entry",
+			vm: &mo.VirtualMachine{
+				Config: &types.VirtualMachineConfigInfo{GuestId: string(types.VirtualMachineGuestOsIdentifierCentos7_64Guest)},
+			},
+			expected: source.OsOtherLinux,
+		},
+		{
+			name: "generic linux guest id family",
+			vm: &mo.VirtualMachine{
+				Config: &types.VirtualMachineConfigInfo{GuestId: string(types.VirtualMachineGuestOsIdentifierOther5xLinux64Guest)},
+			},
+			expected: source.OsLinux,
+		},
+		{
+			name: "gentoo has no vmware guest id and is only detected via free text",
+			vm: &mo.VirtualMachine{
+				Config: &types.VirtualMachineConfigInfo{GuestId: string(types.VirtualMachineGuestOsIdentifierOtherLinuxGuest), GuestFullName: "Gentoo"},
+			},
+			expected: source.OsLinux,
+		},
+		{
+			name: "darwin guest id is not misdetected as windows",
+			vm: &mo.VirtualMachine{
+				Config: &types.VirtualMachineConfigInfo{GuestId: string(types.VirtualMachineGuestOsIdentifierDarwin19_64Guest)},
+			},
+			expected: source.OsUnknown,
+		},
+		{
+			name: "linux from summary guest full name",
+			vm: &mo.VirtualMachine{
+				Summary: types.VirtualMachineSummary{
+					Guest: &types.VirtualMachineGuestSummary{GuestFullName: "Ubuntu Linux (64-bit)"},
+				},
+			},
+			expected: source.OsUbuntu,
+		},
+		{
+			name: "windows from summary guest full name",
+			vm: &mo.VirtualMachine{
+				Summary: types.VirtualMachineSummary{
+					Guest: &types.VirtualMachineGuestSummary{GuestFullName: "Microsoft Windows Server 2022 (64-bit)"},
+				},
+			},
+			expected: source.OsWindows,
+		},
+		{
+			name:     "unknown when no hint",
+			vm:       &mo.VirtualMachine{},
+			expected: source.OsUnknown,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := detectGuestOsType(tt.vm); got != tt.expected {
+				t.Fatalf("expected %q got %q", tt.expected, got)
+			}
+		})
+	}
+}
+
+func TestGuestOsFamilyToOsType(t *testing.T) {
+	tests := []struct {
+		name     string
+		family   string
+		expected string
+	}{
+		{name: "windows", family: string(types.VirtualMachineGuestOsFamilyWindowsGuest), expected: source.OsWindows},
+		{name: "linux", family: string(types.VirtualMachineGuestOsFamilyLinuxGuest), expected: source.OsLinux},
+		{name: "solaris is not windows or linux", family: string(types.VirtualMachineGuestOsFamilySolarisGuest), expected: source.OsUnknown},
+		{name: "empty", family: "", expected: source.OsUnknown},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := guestOsFamilyToOsType(tt.family); got != tt.expected {
+				t.Fatalf("expected %q got %q", tt.expected, got)
 			}
 		})
 	}

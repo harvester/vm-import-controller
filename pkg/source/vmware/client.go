@@ -222,15 +222,20 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 		"name":      vm.Name,
 		"namespace": vm.Namespace,
 		"spec":      info.Items,
-	}, []string{"spec"})).Info("Origin spec of the volumes to be imported")
+	}, []string{"spec"})).Info("The volumes to be imported")
 
-	var vmMo mo.VirtualMachine
-	err = vmObj.Properties(c.ctx, vmObj.Reference(),
-		[]string{"config.hardware.device"},
-		&vmMo)
+	var o mo.VirtualMachine
+	err = vmObj.Properties(c.ctx, vmObj.Reference(), []string{}, &o)
 	if err != nil {
-		return fmt.Errorf("failed to retrieve VM hardware devices: %w", err)
+		return fmt.Errorf("error retrieving VM properties: %w", err)
 	}
+
+	// Log the origin VM specification for better troubleshooting.
+	logrus.WithFields(util.FieldsToJSON(logrus.Fields{
+		"name":      vm.Name,
+		"namespace": vm.Namespace,
+		"spec":      o,
+	}, []string{"spec"})).Info("Origin spec of the VM to be imported")
 
 	diskByBusUnit := map[diskKey]*types.VirtualDisk{}
 	controllerBus := map[int32]int32{}
@@ -238,7 +243,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 	// by building this map, we can later match each lease disk entry to the corresponding
 	// VirtualDisk device in the VM hardware and retrieve the correct disk
 	// capacity from the VM configuration instead of relying on the incorrect LeaseInfo.Items[n].Size value.
-	for _, dev := range vmMo.Config.Hardware.Device {
+	for _, dev := range o.Config.Hardware.Device {
 		if d, ok := dev.(types.BaseVirtualController); ok {
 			ctrl := d.GetVirtualController()
 			controllerBus[dev.GetVirtualDevice().Key] = ctrl.BusNumber
@@ -247,7 +252,7 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) (err e
 
 	// it's rare, but we cannot ensure the controller will always be before the disk in the list of devices
 	// so we need to loop through the devices twice to build a map of disks by their bus and unit numbers
-	for _, dev := range vmMo.Config.Hardware.Device {
+	for _, dev := range o.Config.Hardware.Device {
 		if d, ok := dev.(*types.VirtualDisk); ok {
 			if d.UnitNumber == nil {
 				continue
@@ -440,19 +445,10 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 	}
 
 	var o mo.VirtualMachine
-
 	err = vmObj.Properties(c.ctx, vmObj.Reference(), []string{}, &o)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error retrieving VM properties: %w", err)
 	}
-
-	// Log the origin VM specification for better troubleshooting.
-	// Note, JSON is used to be able to prettify the output for better readability.
-	logrus.WithFields(util.FieldsToJSON(logrus.Fields{
-		"name":      vm.Name,
-		"namespace": vm.Namespace,
-		"spec":      o,
-	}, []string{"spec"})).Info("Origin spec of the VM to be imported")
 
 	// Need CPU, Socket, Memory, VirtualNIC information to perform the mapping
 	networkInfos := generateNetworkInfos(c.networkMapping, o.Config.Hardware.Device)
@@ -476,6 +472,9 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 	vmSpec.Template.Spec.Networks = networkConfig
 	vmSpec.Template.Spec.Domain.Devices.Interfaces = interfaceConfig
 	newVM.Spec = *vmSpec
+
+	guestOsType := detectGuestOsType(&o)
+	source.ApplyGuestOsLabel(newVM, guestOsType)
 
 	// disk attachment needs query by core controller for storage classes, so will be added by the migration controller
 	return newVM, nil
@@ -764,7 +763,7 @@ type diskKey struct {
 //
 //	/vm-13010/VirtualSCSIController0:0  -> bus=0, unit=0
 //	/vm-13010/VirtualNVMEController1:2  -> bus=1, unit=2
-//	scsi0:1                            -> bus=0, unit=1
+//	scsi0:1                             -> bus=0, unit=1
 //
 // The controller prefix may vary (SCSI, NVME, AHCI, IDE, etc.).
 // Only the trailing digits before ":" represent the bus number.
@@ -802,4 +801,86 @@ func parseDeviceId(deviceId string) (bus int32, unit int32, ok bool) {
 	}
 
 	return int32(bus64), int32(unit64), true
+}
+
+// detectGuestOsType determines the guest OS type of a VMware virtual
+// machine, preferring the most specific and reliable source available:
+//  1. GuestId (Config/Guest/Summary): the guest OS identifier chosen when
+//     the VM was created. Always available and, being a fixed VMware enum,
+//     can be classified precisely, down to distribution level.
+//  2. GuestFullName/AlternateGuestName: free text, used as a fallback for
+//     "otherGuest"/custom guest IDs and for distributions VMware has no
+//     dedicated identifier for (e.g. Gentoo).
+//  3. Guest.GuestFamily: the coarse family (windows/linux, no distribution)
+//     reported by VMware Tools. vCenter retains the last reported value
+//     even after the VM is powered off, so it's still a useful last resort.
+func detectGuestOsType(o *mo.VirtualMachine) string {
+	if o == nil {
+		return source.OsUnknown
+	}
+
+	for _, id := range guestOsIds(o) {
+		if osType := source.GuestOsIdToOsType(id); osType != source.OsUnknown {
+			return osType
+		}
+	}
+
+	for _, name := range guestOsNames(o) {
+		if osType := source.GuestOsNameToOsType(name); osType != source.OsUnknown {
+			return osType
+		}
+	}
+
+	if o.Guest != nil {
+		if osType := guestOsFamilyToOsType(o.Guest.GuestFamily); osType != source.OsUnknown {
+			return osType
+		}
+	}
+
+	return source.OsUnknown
+}
+
+// guestOsFamilyToOsType classifies the coarse guest OS family reported by
+// VMware Tools. Unlike a guest OS identifier or name, this has no
+// distribution-level detail, so it's VMware/vSphere-specific and not shared
+// with the OVA importer.
+func guestOsFamilyToOsType(family string) string {
+	switch types.VirtualMachineGuestOsFamily(family) {
+	case types.VirtualMachineGuestOsFamilyWindowsGuest:
+		return source.OsWindows
+	case types.VirtualMachineGuestOsFamilyLinuxGuest:
+		return source.OsLinux
+	default:
+		return source.OsUnknown
+	}
+}
+
+func guestOsIds(o *mo.VirtualMachine) []string {
+	ids := make([]string, 0, 4)
+	if o.Config != nil {
+		ids = append(ids, o.Config.GuestId)
+	}
+	if o.Guest != nil {
+		ids = append(ids, o.Guest.GuestId)
+	}
+	if o.Summary.Guest != nil {
+		ids = append(ids, o.Summary.Guest.GuestId)
+	}
+	ids = append(ids, o.Summary.Config.GuestId)
+	return ids
+}
+
+func guestOsNames(o *mo.VirtualMachine) []string {
+	names := make([]string, 0, 4)
+	if o.Config != nil {
+		names = append(names, o.Config.GuestFullName, o.Config.AlternateGuestName)
+	}
+	if o.Guest != nil {
+		names = append(names, o.Guest.GuestFullName)
+	}
+	if o.Summary.Guest != nil {
+		names = append(names, o.Summary.Guest.GuestFullName)
+	}
+	names = append(names, o.Summary.Config.GuestFullName)
+	return names
 }

@@ -134,6 +134,11 @@ var _ = BeforeSuite(func() {
 
 	pool, err = dockertest.NewPool("")
 	Expect(err).NotTo(HaveOccurred())
+
+	// Remove a leftover container from a previous, interrupted test run.
+	err = pool.RemoveContainerByName("vcsim-integration")
+	Expect(err).NotTo(HaveOccurred())
+
 	runOpts := &dockertest.RunOptions{
 		Name:       "vcsim-integration",
 		Repository: "vmware/vcsim",
