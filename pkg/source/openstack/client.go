@@ -243,11 +243,12 @@ func (c *Client) ExportVirtualMachine(vm *migration.VirtualMachineImport) error 
 		return err
 	}
 
+	// Log the origin VM specification for better troubleshooting.
 	logrus.WithFields(util.FieldsToJSON(logrus.Fields{
 		"name":      vm.Name,
 		"namespace": vm.Namespace,
-		"spec":      vmObj.AttachedVolumes,
-	}, []string{"spec"})).Info("Origin spec of the volumes to be imported")
+		"spec":      vmObj,
+	}, []string{"spec"})).Info("Origin spec of the VM to be imported")
 
 	// Helper function to do the export.
 	// This is necessary so that the defer functions are executed at the right
@@ -524,23 +525,18 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		return nil, fmt.Errorf("error finding VM in GenerateVirtualMachine: %v", err)
 	}
 
-	// Log the origin VM specification for better troubleshooting.
-	// Note, JSON is used to be able to prettify the output for better readability.
-	logrus.WithFields(util.FieldsToJSON(logrus.Fields{
-		"name":      vm.Name,
-		"namespace": vm.Namespace,
-		"spec":      vmObj,
-	}, []string{"spec"})).Info("Origin spec of the VM to be imported")
-
 	flavorObj, err := flavors.Get(c.ctx, c.computeClient, vmObj.Flavor["id"].(string)).Extract()
 	if err != nil {
 		return nil, fmt.Errorf("error looking up flavor: %w", err)
 	}
 
-	fw, err := c.getFirmwareSettings(&vmObj.Server)
+	imageInfo, err := c.getBootImage(&vmObj.Server)
 	if err != nil {
-		return nil, fmt.Errorf("error getting firware settings: %w", err)
+		return nil, fmt.Errorf("error getting boot image: %w", err)
 	}
+
+	fw := getFirmwareSettings(imageInfo)
+	guestOsType := detectGuestOsType(imageInfo)
 
 	networkInfos, err := generateNetworkInfos(vmObj.Addresses, vm.GetDefaultNetworkInterfaceModel())
 	if err != nil {
@@ -579,6 +575,8 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 	vmSpec.Template.Spec.Networks = networkConfig
 	vmSpec.Template.Spec.Domain.Devices.Interfaces = interfaceConfig
 	newVM.Spec = *vmSpec
+
+	source.ApplyGuestOsLabel(newVM, guestOsType)
 
 	// disk attachment needs query by core controller for storage classes, so will be added by the migration controller
 	return newVM, nil
@@ -709,23 +707,35 @@ func (c *Client) findVM(name string) (*ExtendedServer, error) {
 	return &s, err
 }
 
-func (c *Client) getFirmwareSettings(instance *servers.Server) (*source.Firmware, error) {
+// getBootImage looks up the Glance image the instance was booted from, by
+// finding its bootable attached volume and resolving the image referenced in
+// that volume's image metadata. OpenStack exposes no firmware or guest OS
+// information on the instance itself - both are only available as
+// properties on the Glance image it was booted from.
+func (c *Client) getBootImage(instance *servers.Server) (*images.Image, error) {
 	var imageID string
 
 	for _, v := range instance.AttachedVolumes {
 		resp := volumes.Get(c.ctx, c.storageClient, v.ID)
 		var volInfo volumes.Volume
 		if err := resp.ExtractIntoStructPtr(&volInfo, "volume"); err != nil {
-			return nil, fmt.Errorf("error extracting volume info for volume %s: %v", v.ID, err)
+			return nil, fmt.Errorf("error extracting volume info for volume %s: %w", v.ID, err)
 		}
 
 		if volInfo.Bootable == "true" {
 			var volStatus ExtendedVolume
 			if err := resp.ExtractIntoStructPtr(&volStatus, "volume"); err != nil {
-				return nil, fmt.Errorf("error extracting volume status for volume %s: %v", v.ID, err)
+				return nil, fmt.Errorf("error extracting volume status for volume %s: %w", v.ID, err)
 			}
-			imageID = volStatus.VolumeImageMetadata["image_id"]
+			if value, ok := volStatus.VolumeImageMetadata["image_id"]; ok && value != "" {
+				imageID = value
+				break
+			}
 		}
+	}
+
+	if imageID == "" {
+		return nil, fmt.Errorf("no bootable volume with image metadata found for instance %s", instance.ID)
 	}
 
 	imageInfo, err := images.Get(c.ctx, c.imageClient, imageID).Extract()
@@ -733,13 +743,25 @@ func (c *Client) getFirmwareSettings(instance *servers.Server) (*source.Firmware
 		return nil, fmt.Errorf("error getting image details for image %s: %v", imageID, err)
 	}
 
+	return imageInfo, nil
+}
+
+// getFirmwareSettings extracts the BIOS/EFI, SecureBoot and TPM settings
+// from the given Glance image's properties: "hw_firmware_type" ("uefi"),
+// "hw_tpm_model", and "os_secure_boot" ("required" or "optional"). See
+// https://docs.openstack.org/glance/latest/admin/useful-image-properties.html
+// for more information.
+func getFirmwareSettings(imageInfo *images.Image) *source.Firmware {
 	fw := source.NewFirmware(false, false, false)
 
-	firmwareType, ok := imageInfo.Properties["hw_firmware_type"]
-	if ok && firmwareType.(string) == "uefi" {
+	if imageInfo == nil {
+		return fw
+	}
+
+	if firmwareType, ok := imageInfo.Properties["hw_firmware_type"]; ok && firmwareType == "uefi" {
 		fw.UEFI = true
 	}
-	logrus.Debugf("found image firmware settings %v", imageInfo.Properties)
+
 	if _, ok := imageInfo.Properties["hw_tpm_model"]; ok {
 		fw.TPM = true
 	}
@@ -748,7 +770,35 @@ func (c *Client) getFirmwareSettings(instance *servers.Server) (*source.Firmware
 		fw.SecureBoot = true
 	}
 
-	return fw, nil
+	return fw
+}
+
+// detectGuestOsType determines the guest OS type from a Glance image,
+// preferring the most specific source available:
+//  1. "os_distro": a recognized, standardized property value,
+//     e.g. "ubuntu", "rhel", "windows", "gentoo".
+//     See https://docs.openstack.org/glance/latest/admin/useful-image-properties.html
+//     for more information.
+//  2. "os_type": the coarse linux/windows family, used as a fallback when
+//     "os_distro" is absent or not a recognized value.
+func detectGuestOsType(imageInfo *images.Image) string {
+	if imageInfo == nil {
+		return source.OsUnknown
+	}
+
+	if osDistro, ok := imageInfo.Properties["os_distro"].(string); ok {
+		if osType := source.GuestOsIdToOsType(osDistro); osType != source.OsUnknown {
+			return osType
+		}
+	}
+
+	if osTypeProp, ok := imageInfo.Properties["os_type"].(string); ok {
+		if osType := source.GuestOsNameToOsType(osTypeProp); osType != source.OsUnknown {
+			return osType
+		}
+	}
+
+	return source.OsUnknown
 }
 
 func generateNetworkInfos(info map[string]interface{}, defaultInterfaceModel string) ([]source.NetworkInfo, error) {
