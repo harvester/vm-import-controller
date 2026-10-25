@@ -79,6 +79,7 @@ func NewVirtualMachineSpec(cfg VirtualMachineSpecConfig) *kubevirtv1.VirtualMach
 	}
 }
 
+// ApplyFirmwareSettings applies the firmware settings to the given VirtualMachineSpec custom resource.
 func ApplyFirmwareSettings(vmSpec *kubevirtv1.VirtualMachineSpec, fw *Firmware) {
 	if !fw.UEFI {
 		return
@@ -106,6 +107,17 @@ func ApplyFirmwareSettings(vmSpec *kubevirtv1.VirtualMachineSpec, fw *Firmware) 
 			Enabled: ptr.To(true),
 		}
 	}
+}
+
+// ApplyGuestOsLabel applies the guest OS label to the given VirtualMachine custom resource.
+func ApplyGuestOsLabel(vm *kubevirtv1.VirtualMachine, guestOsType string) {
+	if guestOsType == "" {
+		return
+	}
+	if vm.Labels == nil {
+		vm.Labels = make(map[string]string)
+	}
+	vm.Labels["harvesterhci.io/os"] = guestOsType
 }
 
 // RemoveTempImageFiles removes temporary image files used during migration.
