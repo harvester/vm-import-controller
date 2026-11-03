@@ -23,7 +23,7 @@ require (
 	k8s.io/client-go v12.0.0+incompatible
 	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4
 	kubevirt.io/api v1.7.0
-	kubevirt.io/kubevirt v1.7.0
+	kubevirt.io/kubevirt v1.9.0
 	sigs.k8s.io/cluster-api v1.9.5
 	sigs.k8s.io/controller-runtime v0.21.0
 )
