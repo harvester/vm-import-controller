@@ -456,8 +456,8 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 	vmSpec := source.NewVirtualMachineSpec(source.VirtualMachineSpecConfig{
 		Name: vm.Status.ImportedVirtualMachineName,
 		Hardware: source.Hardware{
-			NumCPU:            uint32(o.Config.Hardware.NumCPU),            // nolint:gosec
-			NumCoresPerSocket: uint32(o.Config.Hardware.NumCoresPerSocket), // nolint:gosec
+			NumCPU:            uint32(o.Config.Hardware.NumCPU), // nolint:gosec
+			NumCoresPerSocket: coresPerSocket(o.Config.Hardware),
 			MemoryMB:          int64(o.Config.Hardware.MemoryMB),
 		},
 	})
@@ -478,6 +478,17 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 
 	// disk attachment needs query by core controller for storage classes, so will be added by the migration controller
 	return newVM, nil
+}
+
+func coresPerSocket(hw types.VirtualHardware) uint32 {
+	// Assigned at power-on, so a powered-off VM has no usable value.
+	if ptr.Deref(hw.AutoCoresPerSocket, false) {
+		return 0
+	}
+	if hw.NumCoresPerSocket <= 0 {
+		return 1
+	}
+	return uint32(hw.NumCoresPerSocket) // nolint:gosec
 }
 
 func (c *Client) findVM(path, name string) (*object.VirtualMachine, error) {

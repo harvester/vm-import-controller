@@ -28,9 +28,16 @@ func NewFirmware(uefi, tpm, secureBoot bool) *Firmware {
 }
 
 type Hardware struct {
-	NumCPU            uint32 // The type is adapted to KubeVirt CPU
-	NumCoresPerSocket uint32 // The type is adapted to KubeVirt CPU
+	NumCPU            uint32
+	NumCoresPerSocket uint32 // 0 means the socket layout is unknown
 	MemoryMB          int64
+}
+
+func cpuTopology(numCPU, coresPerSocket uint32) (sockets, cores uint32) {
+	if coresPerSocket == 0 || numCPU%coresPerSocket != 0 {
+		return 1, numCPU
+	}
+	return numCPU / coresPerSocket, coresPerSocket
 }
 
 func NewHardware(numCPU, numCoresPerSocket uint32, memoryMB int64) *Hardware {
@@ -43,6 +50,8 @@ type VirtualMachineSpecConfig struct {
 }
 
 func NewVirtualMachineSpec(cfg VirtualMachineSpecConfig) *kubevirtv1.VirtualMachineSpec {
+	sockets, cores := cpuTopology(cfg.Hardware.NumCPU, cfg.Hardware.NumCoresPerSocket)
+
 	return &kubevirtv1.VirtualMachineSpec{
 		RunStrategy: ptr.To(kubevirtv1.RunStrategyRerunOnFailure),
 		Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
@@ -55,8 +64,8 @@ func NewVirtualMachineSpec(cfg VirtualMachineSpecConfig) *kubevirtv1.VirtualMach
 				EvictionStrategy: ptr.To(kubevirtv1.EvictionStrategyLiveMigrateIfPossible),
 				Domain: kubevirtv1.DomainSpec{
 					CPU: &kubevirtv1.CPU{
-						Cores:   cfg.Hardware.NumCPU,
-						Sockets: cfg.Hardware.NumCoresPerSocket,
+						Cores:   cores,
+						Sockets: sockets,
 						Threads: 1,
 					},
 					Memory: &kubevirtv1.Memory{
