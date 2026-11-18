@@ -170,3 +170,30 @@ func Test_NewVirtualMachineSpec(t *testing.T) {
 		})
 	}
 }
+
+func Test_HardwareSocketsAndCores(t *testing.T) {
+	testCases := []struct {
+		desc           string
+		numCPU         uint32
+		coresPerSocket uint32
+		sockets        uint32
+		cores          uint32
+	}{
+		{"2 sockets x 2 cores", 4, 2, 2, 2},
+		{"1 socket x 4 cores", 4, 4, 1, 4},
+		{"4 sockets x 1 core", 4, 1, 4, 1},
+		{"2 sockets x 32 cores", 64, 32, 2, 32},
+		{"unknown cores per socket uses one socket", 4, 0, 1, 4},
+		{"not divisible uses one socket", 4, 3, 1, 4},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.desc, func(t *testing.T) {
+			assert := require.New(t)
+			h := NewHardware(tc.numCPU, tc.coresPerSocket, 0)
+			assert.Equal(tc.sockets, h.Sockets(), "expected sockets to match")
+			assert.Equal(tc.cores, h.Cores(), "expected cores to match")
+			assert.Equal(tc.numCPU, h.Sockets()*h.Cores(), "expected sockets x cores to equal NumCPU")
+		})
+	}
+}

@@ -33,11 +33,24 @@ type Hardware struct {
 	MemoryMB          int64
 }
 
-func cpuTopology(numCPU, coresPerSocket uint32) (sockets, cores uint32) {
-	if coresPerSocket == 0 || numCPU%coresPerSocket != 0 {
-		return 1, numCPU
+// Sockets returns the KubeVirt socket count (domain.cpu.sockets).
+// NumCPU is the total vCPU count, so the sockets are NumCPU / NumCoresPerSocket.
+// If NumCoresPerSocket is unknown (0) or does not divide NumCPU, all vCPUs
+// are placed on one socket.
+func (h Hardware) Sockets() uint32 {
+	if h.NumCoresPerSocket == 0 || h.NumCPU%h.NumCoresPerSocket != 0 {
+		return 1
 	}
-	return numCPU / coresPerSocket, coresPerSocket
+	return h.NumCPU / h.NumCoresPerSocket
+}
+
+// Cores returns the KubeVirt cores per socket (domain.cpu.cores).
+// Together with Sockets and one thread it always yields NumCPU vCPUs.
+func (h Hardware) Cores() uint32 {
+	if h.Sockets() == 1 {
+		return h.NumCPU
+	}
+	return h.NumCoresPerSocket
 }
 
 func NewHardware(numCPU, numCoresPerSocket uint32, memoryMB int64) *Hardware {
@@ -50,8 +63,6 @@ type VirtualMachineSpecConfig struct {
 }
 
 func NewVirtualMachineSpec(cfg VirtualMachineSpecConfig) *kubevirtv1.VirtualMachineSpec {
-	sockets, cores := cpuTopology(cfg.Hardware.NumCPU, cfg.Hardware.NumCoresPerSocket)
-
 	return &kubevirtv1.VirtualMachineSpec{
 		RunStrategy: ptr.To(kubevirtv1.RunStrategyRerunOnFailure),
 		Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
@@ -64,8 +75,8 @@ func NewVirtualMachineSpec(cfg VirtualMachineSpecConfig) *kubevirtv1.VirtualMach
 				EvictionStrategy: ptr.To(kubevirtv1.EvictionStrategyLiveMigrateIfPossible),
 				Domain: kubevirtv1.DomainSpec{
 					CPU: &kubevirtv1.CPU{
-						Cores:   cores,
-						Sockets: sockets,
+						Cores:   cfg.Hardware.Cores(),
+						Sockets: cfg.Hardware.Sockets(),
 						Threads: 1,
 					},
 					Memory: &kubevirtv1.Memory{
