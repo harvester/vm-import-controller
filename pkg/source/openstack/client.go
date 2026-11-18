@@ -561,8 +561,8 @@ func (c *Client) GenerateVirtualMachine(vm *migration.VirtualMachineImport) (*ku
 		Name: vm.Status.ImportedVirtualMachineName,
 		Hardware: source.Hardware{
 			NumCPU:            uint32(flavorObj.VCPUs), // nolint:gosec
-			NumCoresPerSocket: 1,
-			MemoryMB:          int64(flavorObj.RAM), // nolint:gosec
+			NumCoresPerSocket: 0,                       // a flavor has no cores per socket
+			MemoryMB:          int64(flavorObj.RAM),    // nolint:gosec
 		},
 	})
 

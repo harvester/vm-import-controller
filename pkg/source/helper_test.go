@@ -64,34 +64,79 @@ func Test_vmSpecSetupUefiSettings(t *testing.T) {
 }
 
 func Test_NewVirtualMachineSpec(t *testing.T) {
-	assert := require.New(t)
 	testCases := []struct {
 		desc               string
 		config             VirtualMachineSpecConfig
-		expectedName       string
 		expectedCPUCores   uint32
 		expectedCPUSockets uint32
+		expectedCPULimit   int64
 		expectedMemory     string
 	}{
 		{
-			desc: "Basic configuration",
+			desc: "2 sockets x 2 cores stays 4 vCPUs",
 			config: VirtualMachineSpecConfig{
 				Name:     "basic-vm",
 				Hardware: *NewHardware(4, 2, 8192),
 			},
-			expectedCPUCores:   4,
+			expectedCPUCores:   2,
 			expectedCPUSockets: 2,
+			expectedCPULimit:   4,
 			expectedMemory:     "8192M",
 		},
 		{
-			desc: "High CPU and memory configuration",
+			desc: "1 socket x 4 cores stays 4 vCPUs",
+			config: VirtualMachineSpecConfig{
+				Name:     "single-socket-vm",
+				Hardware: *NewHardware(4, 4, 8192),
+			},
+			expectedCPUCores:   4,
+			expectedCPUSockets: 1,
+			expectedCPULimit:   4,
+			expectedMemory:     "8192M",
+		},
+		{
+			desc: "2 sockets x 32 cores stays 64 vCPUs",
 			config: VirtualMachineSpecConfig{
 				Name:     "high-performance-vm",
 				Hardware: *NewHardware(64, 32, 65536),
 			},
-			expectedCPUCores:   64,
-			expectedCPUSockets: 32,
+			expectedCPUCores:   32,
+			expectedCPUSockets: 2,
+			expectedCPULimit:   64,
 			expectedMemory:     "65536M",
+		},
+		{
+			desc: "4 sockets x 1 core stays 4 vCPUs",
+			config: VirtualMachineSpecConfig{
+				Name:     "one-core-per-socket-vm",
+				Hardware: *NewHardware(4, 1, 2048),
+			},
+			expectedCPUCores:   1,
+			expectedCPUSockets: 4,
+			expectedCPULimit:   4,
+			expectedMemory:     "2048M",
+		},
+		{
+			desc: "unknown cores per socket puts all vCPUs on one socket",
+			config: VirtualMachineSpecConfig{
+				Name:     "unknown-topology-vm",
+				Hardware: *NewHardware(4, 0, 2048),
+			},
+			expectedCPUCores:   4,
+			expectedCPUSockets: 1,
+			expectedCPULimit:   4,
+			expectedMemory:     "2048M",
+		},
+		{
+			desc: "vCPU count not divisible by cores per socket puts all vCPUs on one socket",
+			config: VirtualMachineSpecConfig{
+				Name:     "inconsistent-topology-vm",
+				Hardware: *NewHardware(4, 3, 512),
+			},
+			expectedCPUCores:   4,
+			expectedCPUSockets: 1,
+			expectedCPULimit:   4,
+			expectedMemory:     "512M",
 		},
 		{
 			desc: "Minimal hardware configuration",
@@ -101,23 +146,54 @@ func Test_NewVirtualMachineSpec(t *testing.T) {
 			},
 			expectedCPUCores:   1,
 			expectedCPUSockets: 1,
+			expectedCPULimit:   1,
 			expectedMemory:     "512M",
 		},
 	}
 
 	for _, tc := range testCases {
-		vmSpec := NewVirtualMachineSpec(tc.config)
-		assert.Contains(vmSpec.Template.ObjectMeta.Labels, harvesterutil.LabelVMName, "expected VMName label to be present")
-		assert.Equal(vmSpec.Template.ObjectMeta.Labels[harvesterutil.LabelVMName], tc.config.Name, "expected VMName label to match")
-		assert.Equal(ptr.Deref(vmSpec.RunStrategy, ""), kubevirtv1.RunStrategyRerunOnFailure, "expected RunStrategy to match")
-		assert.Equal(ptr.Deref(vmSpec.Template.Spec.EvictionStrategy, ""), kubevirtv1.EvictionStrategyLiveMigrateIfPossible, "expected EvictionStrategy to match")
-		assert.Equal(vmSpec.Template.ObjectMeta.Labels["harvesterhci.io/vmName"], tc.config.Name, "expected VM Name to match")
-		assert.Equal(vmSpec.Template.Spec.Domain.CPU.Cores, tc.expectedCPUCores, "expected CPU cores to match")
-		assert.Equal(vmSpec.Template.Spec.Domain.CPU.Sockets, tc.expectedCPUSockets, "expected CPU cores to match")
-		assert.Equal(vmSpec.Template.Spec.Domain.CPU.Threads, uint32(1), "expected CPU threads to match")
-		assert.Equal(vmSpec.Template.Spec.Domain.Memory.Guest.String(), tc.expectedMemory, "expected memory to match")
-		assert.Equal(vmSpec.Template.Spec.Domain.Resources.Limits.Memory().String(), tc.expectedMemory, "expected memory limit to match")
-		assert.Equal(vmSpec.Template.Spec.Domain.Resources.Limits.Cpu().Value(), int64(tc.expectedCPUCores), "expected CPU limit to match")
-		assert.Equal(vmSpec.Template.Spec.Domain.Features.ACPI.Enabled, ptr.To(true), "expected ACPI to be enabled")
+		t.Run(tc.desc, func(t *testing.T) {
+			assert := require.New(t)
+			vmSpec := NewVirtualMachineSpec(tc.config)
+			assert.Contains(vmSpec.Template.ObjectMeta.Labels, harvesterutil.LabelVMName, "expected VMName label to be present")
+			assert.Equal(vmSpec.Template.ObjectMeta.Labels[harvesterutil.LabelVMName], tc.config.Name, "expected VMName label to match")
+			assert.Equal(ptr.Deref(vmSpec.RunStrategy, ""), kubevirtv1.RunStrategyRerunOnFailure, "expected RunStrategy to match")
+			assert.Equal(ptr.Deref(vmSpec.Template.Spec.EvictionStrategy, ""), kubevirtv1.EvictionStrategyLiveMigrateIfPossible, "expected EvictionStrategy to match")
+			assert.Equal(vmSpec.Template.ObjectMeta.Labels["harvesterhci.io/vmName"], tc.config.Name, "expected VM Name to match")
+			assert.Equal(vmSpec.Template.Spec.Domain.CPU.Cores, tc.expectedCPUCores, "expected CPU cores to match")
+			assert.Equal(vmSpec.Template.Spec.Domain.CPU.Sockets, tc.expectedCPUSockets, "expected CPU sockets to match")
+			assert.Equal(vmSpec.Template.Spec.Domain.CPU.Threads, uint32(1), "expected CPU threads to match")
+			assert.Equal(vmSpec.Template.Spec.Domain.Memory.Guest.String(), tc.expectedMemory, "expected memory to match")
+			assert.Equal(vmSpec.Template.Spec.Domain.Resources.Limits.Memory().String(), tc.expectedMemory, "expected memory limit to match")
+			assert.Equal(vmSpec.Template.Spec.Domain.Resources.Limits.Cpu().Value(), tc.expectedCPULimit, "expected CPU limit to match")
+			assert.Equal(vmSpec.Template.Spec.Domain.Features.ACPI.Enabled, ptr.To(true), "expected ACPI to be enabled")
+		})
+	}
+}
+
+func Test_HardwareSocketsAndCores(t *testing.T) {
+	testCases := []struct {
+		desc           string
+		numCPU         uint32
+		coresPerSocket uint32
+		sockets        uint32
+		cores          uint32
+	}{
+		{"2 sockets x 2 cores", 4, 2, 2, 2},
+		{"1 socket x 4 cores", 4, 4, 1, 4},
+		{"4 sockets x 1 core", 4, 1, 4, 1},
+		{"2 sockets x 32 cores", 64, 32, 2, 32},
+		{"unknown cores per socket uses one socket", 4, 0, 1, 4},
+		{"not divisible uses one socket", 4, 3, 1, 4},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.desc, func(t *testing.T) {
+			assert := require.New(t)
+			h := NewHardware(tc.numCPU, tc.coresPerSocket, 0)
+			assert.Equal(tc.sockets, h.Sockets(), "expected sockets to match")
+			assert.Equal(tc.cores, h.Cores(), "expected cores to match")
+			assert.Equal(tc.numCPU, h.Sockets()*h.Cores(), "expected sockets x cores to equal NumCPU")
+		})
 	}
 }

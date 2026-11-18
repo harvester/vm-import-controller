@@ -200,7 +200,7 @@ func (c *Client) GenerateVirtualMachine(vmi *migration.VirtualMachineImport) (*k
 		Name: vmi.Status.ImportedVirtualMachineName,
 		Hardware: source.Hardware{
 			NumCPU:            hw.NumCPU,
-			NumCoresPerSocket: 1, // OVF does not provide cores per socket information.
+			NumCoresPerSocket: 0, // OVF has no cores per socket
 			MemoryMB:          hw.MemoryMB,
 		},
 	})

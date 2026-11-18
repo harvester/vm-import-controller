@@ -611,6 +611,41 @@ func TestParseDeviceId(t *testing.T) {
 	}
 }
 
+func Test_coresPerSocket(t *testing.T) {
+	testCases := []struct {
+		desc     string
+		hw       types.VirtualHardware
+		expected uint32
+	}{
+		{
+			desc:     "manual cores per socket",
+			hw:       types.VirtualHardware{NumCPU: 4, NumCoresPerSocket: 2},
+			expected: 2,
+		},
+		{
+			desc:     "manual cores per socket with auto explicitly disabled",
+			hw:       types.VirtualHardware{NumCPU: 4, NumCoresPerSocket: 4, AutoCoresPerSocket: ptr.To(false)},
+			expected: 4,
+		},
+		{
+			desc:     "unset cores per socket implies one core per socket",
+			hw:       types.VirtualHardware{NumCPU: 4},
+			expected: 1,
+		},
+		{
+			desc:     "cores per socket assigned at power-on is ignored",
+			hw:       types.VirtualHardware{NumCPU: 8, NumCoresPerSocket: 1, AutoCoresPerSocket: ptr.To(true)},
+			expected: 0,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.desc, func(t *testing.T) {
+			require.Equal(t, tc.expected, coresPerSocket(tc.hw))
+		})
+	}
+}
+
 func TestDetectGuestOsType(t *testing.T) {
 	tests := []struct {
 		name     string

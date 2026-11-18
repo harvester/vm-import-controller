@@ -28,9 +28,29 @@ func NewFirmware(uefi, tpm, secureBoot bool) *Firmware {
 }
 
 type Hardware struct {
-	NumCPU            uint32 // The type is adapted to KubeVirt CPU
-	NumCoresPerSocket uint32 // The type is adapted to KubeVirt CPU
+	NumCPU            uint32
+	NumCoresPerSocket uint32 // 0 means the socket layout is unknown
 	MemoryMB          int64
+}
+
+// Sockets returns the KubeVirt socket count (domain.cpu.sockets).
+// NumCPU is the total vCPU count, so the sockets are NumCPU / NumCoresPerSocket.
+// If NumCoresPerSocket is unknown (0) or does not divide NumCPU, all vCPUs
+// are placed on one socket.
+func (h Hardware) Sockets() uint32 {
+	if h.NumCoresPerSocket == 0 || h.NumCPU%h.NumCoresPerSocket != 0 {
+		return 1
+	}
+	return h.NumCPU / h.NumCoresPerSocket
+}
+
+// Cores returns the KubeVirt cores per socket (domain.cpu.cores).
+// Together with Sockets and one thread it always yields NumCPU vCPUs.
+func (h Hardware) Cores() uint32 {
+	if h.Sockets() == 1 {
+		return h.NumCPU
+	}
+	return h.NumCoresPerSocket
 }
 
 func NewHardware(numCPU, numCoresPerSocket uint32, memoryMB int64) *Hardware {
@@ -55,8 +75,8 @@ func NewVirtualMachineSpec(cfg VirtualMachineSpecConfig) *kubevirtv1.VirtualMach
 				EvictionStrategy: ptr.To(kubevirtv1.EvictionStrategyLiveMigrateIfPossible),
 				Domain: kubevirtv1.DomainSpec{
 					CPU: &kubevirtv1.CPU{
-						Cores:   cfg.Hardware.NumCPU,
-						Sockets: cfg.Hardware.NumCoresPerSocket,
+						Cores:   cfg.Hardware.Cores(),
+						Sockets: cfg.Hardware.Sockets(),
 						Threads: 1,
 					},
 					Memory: &kubevirtv1.Memory{
